@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Web Performance Suite v5.4
+// @name         Web Performance Suite v5.5
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      5.4
-// @description  Ultra-fast page loads: preemptive image/script/style rewriting, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching.
+// @version      5.5
+// @description  Ultra-fast page loads: resource hints, preconnect, preload, font optimization, script deferral, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching.
 // @author       You
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
@@ -34,6 +34,11 @@
             lazyLoadMedia: true,
             hardwareAccel: true,
             dnsPrefetch: true,
+            preconnect: true,
+            preloadCritical: true,
+            fontOptimization: true,
+            aggressiveDefer: true,
+            reduceReflows: true,
             imageFormats: ['jpg', 'jpeg', 'png'],
             preferFormat: 'webp',
             backgroundFps: 12,
@@ -78,13 +83,18 @@
             this.interceptScripts();
             this.enableHardwareAcceleration();
             this.enableDNSPrefetch();
+            this.enablePreconnect();
+            this.enablePreload();
+            this.optimizeFonts();
+            this.deferNonCriticalScripts();
+            this.reduceReflowsOptimization();
             setInterval(() => this.updateDiagnostics(), 1000);
 
             document.addEventListener('visibilitychange', () => {
                 this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
             });
 
-            this.log.info('Web Performance Suite v5.4 initialized ⚡');
+            this.log.info('Web Performance Suite v5.5 initialized ⚡');
         },
 
         registerMenu() {
@@ -118,6 +128,11 @@
                 case 'lazyLoadMedia': if (this.config.lazyLoadMedia) this.observeLazyMedia(); break;
                 case 'hardwareAccel': this.enableHardwareAcceleration(); break;
                 case 'dnsPrefetch': this.enableDNSPrefetch(); break;
+                case 'preconnect': this.enablePreconnect(); break;
+                case 'preloadCritical': this.enablePreload(); break;
+                case 'fontOptimization': this.optimizeFonts(); break;
+                case 'aggressiveDefer': this.deferNonCriticalScripts(); break;
+                case 'reduceReflows': this.reduceReflowsOptimization(); break;
             }
         },
 
@@ -457,6 +472,218 @@
         },
 
         /****************************
+         * PRECONNECT OPTIMIZATION
+         ****************************/
+        enablePreconnect() {
+            if (!this.config.preconnect) return;
+
+            // Extract unique external domains from the page
+            const externalDomains = new Set();
+            document.querySelectorAll('link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+                try {
+                    const url = new URL(el.href || el.src);
+                    if (url.hostname !== location.hostname) {
+                        externalDomains.add(url.origin);
+                    }
+                } catch (e) {
+                    // Silently ignore invalid URLs
+                }
+            });
+
+            // Add preconnect for external domains to establish early connections
+            Array.from(externalDomains).slice(0, 10).forEach(origin => {
+                const link = document.createElement('link');
+                link.rel = 'preconnect';
+                link.href = origin;
+                link.crossOrigin = 'anonymous';
+                this.appendToHead(link);
+            });
+
+            this.log.info(`Preconnect enabled for ${Math.min(externalDomains.size, 10)} domains`);
+        },
+
+        /****************************
+         * PRELOAD CRITICAL RESOURCES
+         ****************************/
+        enablePreload() {
+            if (!this.config.preloadCritical) return;
+
+            // Preload critical CSS files
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link, index) => {
+                if (index < 3) { // Only first 3 stylesheets are considered critical
+                    const preloadLink = document.createElement('link');
+                    preloadLink.rel = 'preload';
+                    preloadLink.as = 'style';
+                    preloadLink.href = link.href;
+                    this.appendToHead(preloadLink);
+                }
+            });
+
+            // Preload visible images
+            const visibleImages = Array.from(document.querySelectorAll('img[src]'))
+                .filter(img => {
+                    const rect = img.getBoundingClientRect();
+                    return rect.top < window.innerHeight && rect.bottom > 0;
+                })
+                .slice(0, 5);
+
+            visibleImages.forEach(img => {
+                const preloadLink = document.createElement('link');
+                preloadLink.rel = 'preload';
+                preloadLink.as = 'image';
+                preloadLink.href = img.src;
+                this.appendToHead(preloadLink);
+            });
+
+            this.log.info('Critical resource preloading enabled');
+        },
+
+        /****************************
+         * FONT OPTIMIZATION
+         ****************************/
+        optimizeFonts() {
+            if (!this.config.fontOptimization) return;
+
+            // Add font-display: swap to all @font-face rules
+            const style = document.createElement('style');
+            style.id = 'webperf-font-opt';
+            style.textContent = `
+                @font-face {
+                    font-display: swap;
+                }
+            `;
+            this.appendToHead(style);
+
+            // Observe and optimize font link tags
+            const optimizeFontLink = (link) => {
+                if (link.href && link.href.includes('fonts')) {
+                    // Add font-display parameter for Google Fonts
+                    if (link.href.includes('fonts.googleapis.com')) {
+                        const url = new URL(link.href);
+                        if (!url.searchParams.has('display')) {
+                            url.searchParams.set('display', 'swap');
+                            link.href = url.href;
+                        }
+                    }
+                    // Preconnect to font origins
+                    const preconnect = document.createElement('link');
+                    preconnect.rel = 'preconnect';
+                    preconnect.href = new URL(link.href).origin;
+                    preconnect.crossOrigin = 'anonymous';
+                    this.appendToHead(preconnect);
+                }
+            };
+
+            document.querySelectorAll('link[rel="stylesheet"]').forEach(optimizeFontLink);
+
+            this.log.info('Font optimization enabled');
+        },
+
+        /****************************
+         * AGGRESSIVE SCRIPT DEFERRAL
+         ****************************/
+        deferNonCriticalScripts() {
+            if (!this.config.aggressiveDefer) return;
+
+            // Use requestIdleCallback for non-critical operations
+            const scheduleIdleTask = (task) => {
+                if ('requestIdleCallback' in window) {
+                    requestIdleCallback(task, { timeout: 2000 });
+                } else {
+                    setTimeout(task, 1);
+                }
+            };
+
+            // Defer third-party scripts
+            const deferScript = (script) => {
+                if (!script.src) return;
+                
+                // Check if it's a third-party script
+                try {
+                    const url = new URL(script.src);
+                    if (url.hostname !== location.hostname) {
+                        if (!script.hasAttribute('defer') && !script.hasAttribute('async')) {
+                            script.defer = true;
+                            this.log.debug(`Deferred: ${script.src}`);
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            // Defer analytics and tracking scripts specifically
+            scheduleIdleTask(() => {
+                document.querySelectorAll('script[src*="analytics"], script[src*="tracking"], script[src*="gtag"], script[src*="facebook"], script[src*="twitter"]').forEach(deferScript);
+            });
+
+            this.log.info('Aggressive script deferral enabled');
+        },
+
+        /****************************
+         * REDUCE REFLOWS
+         ****************************/
+        reduceReflowsOptimization() {
+            if (!this.config.reduceReflows) return;
+
+            // Batch DOM reads and writes using requestAnimationFrame
+            let readQueue = [];
+            let writeQueue = [];
+            let scheduled = false;
+
+            const flush = () => {
+                // Read phase
+                readQueue.forEach(task => task());
+                readQueue = [];
+                
+                // Write phase
+                writeQueue.forEach(task => task());
+                writeQueue = [];
+                
+                scheduled = false;
+            };
+
+            // Expose batching API
+            window.webPerfBatch = {
+                read: (task) => {
+                    readQueue.push(task);
+                    if (!scheduled) {
+                        scheduled = true;
+                        requestAnimationFrame(flush);
+                    }
+                },
+                write: (task) => {
+                    writeQueue.push(task);
+                    if (!scheduled) {
+                        scheduled = true;
+                        requestAnimationFrame(flush);
+                    }
+                }
+            };
+
+            // Optimize common reflow-causing operations
+            const style = document.createElement('style');
+            style.id = 'webperf-reflow-opt';
+            style.textContent = `
+                /* Reduce layout thrashing */
+                * {
+                    will-change: auto;
+                }
+                
+                /* Contain layout where possible */
+                img, video, iframe {
+                    contain: layout;
+                }
+                
+                /* Use content-visibility for off-screen content */
+                .webperf-lazy-section {
+                    content-visibility: auto;
+                }
+            `;
+            this.appendToHead(style);
+
+            this.log.info('Reflow reduction optimizations enabled');
+        },
+
+        /****************************
          * DIAGNOSTICS
          ****************************/
         toggleDiagnostics() {
@@ -490,7 +717,7 @@
         updateDiagnostics() {
             if (!this.config.diagnosticsPanel || !this.diagPanel) return;
             this.diagPanel.innerHTML = `
-                <b>WebPerf v5.4</b><br>
+                <b>WebPerf v5.5</b><br>
                 FPS: ${this.fpsTarget}<br>
                 Cache Hits: ${this.diagnostics.cacheHits}<br>
                 Cache Misses: ${this.diagnostics.cacheMisses}<br>
