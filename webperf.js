@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Web Performance Suite v5.3
+// @name         Web Performance Suite v5.4
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      5.3
-// @description  Ultra-fast page loads: preemptive image/script/style rewriting, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics.
+// @version      5.4
+// @description  Ultra-fast page loads: preemptive image/script/style rewriting, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching.
 // @author       You
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
@@ -22,6 +22,8 @@
             workerAnalyzer: true,
             diagnosticsPanel: true,
             lazyLoadMedia: true,
+            hardwareAccel: true,
+            dnsPrefetch: true,
             imageFormats: ['jpg', 'jpeg', 'png'],
             preferFormat: 'webp',
             backgroundFps: 12,
@@ -55,13 +57,15 @@
             this.initWorker();
             this.prefetchAssets();
             this.interceptScripts();
+            this.enableHardwareAcceleration();
+            this.enableDNSPrefetch();
             setInterval(() => this.updateDiagnostics(), 1000);
 
             document.addEventListener('visibilitychange', () => {
                 this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
             });
 
-            this.log.info('Web Performance Suite v5.3 initialized ⚡');
+            this.log.info('Web Performance Suite v5.4 initialized ⚡');
         },
 
         registerMenu() {
@@ -83,6 +87,8 @@
                 case 'diagnosticsPanel': this.toggleDiagnostics(); break;
                 case 'imageRewriter': if (this.config.imageRewriter) this.observeImages(); break;
                 case 'lazyLoadMedia': if (this.config.lazyLoadMedia) this.observeLazyMedia(); break;
+                case 'hardwareAccel': this.enableHardwareAcceleration(); break;
+                case 'dnsPrefetch': this.enableDNSPrefetch(); break;
             }
         },
 
@@ -283,6 +289,124 @@
         },
 
         /****************************
+         * HARDWARE ACCELERATION
+         ****************************/
+        enableHardwareAcceleration() {
+            if (!this.config.hardwareAccel) {
+                // Remove the style tag if it exists
+                const existing = document.getElementById('webperf-hw-accel');
+                if (existing) existing.remove();
+                return;
+            }
+
+            // Create and inject CSS to force hardware acceleration
+            const style = document.createElement('style');
+            style.id = 'webperf-hw-accel';
+            style.textContent = `
+                * {
+                    transform: translateZ(0);
+                    -webkit-transform: translateZ(0);
+                    -moz-transform: translateZ(0);
+                    -ms-transform: translateZ(0);
+                    -o-transform: translateZ(0);
+                    backface-visibility: hidden;
+                    -webkit-backface-visibility: hidden;
+                    -moz-backface-visibility: hidden;
+                    -ms-backface-visibility: hidden;
+                    perspective: 1000;
+                    -webkit-perspective: 1000;
+                    -moz-perspective: 1000;
+                    -ms-perspective: 1000;
+                }
+                
+                img, video, canvas {
+                    transform: translate3d(0, 0, 0);
+                    -webkit-transform: translate3d(0, 0, 0);
+                }
+            `;
+            
+            // Append to head when available
+            if (document.head) {
+                document.head.appendChild(style);
+            } else {
+                const observer = new MutationObserver(() => {
+                    if (document.head) {
+                        document.head.appendChild(style);
+                        observer.disconnect();
+                    }
+                });
+                observer.observe(document.documentElement, { childList: true });
+            }
+
+            this.log.info('Hardware acceleration enabled');
+        },
+
+        /****************************
+         * DNS PREFETCHING
+         ****************************/
+        enableDNSPrefetch() {
+            if (!this.config.dnsPrefetch) return;
+
+            // Common domains to prefetch
+            const commonDomains = [
+                'www.google.com',
+                'www.gstatic.com',
+                'fonts.googleapis.com',
+                'fonts.gstatic.com',
+                'ajax.googleapis.com',
+                'cdn.jsdelivr.net',
+                'cdnjs.cloudflare.com',
+                'unpkg.com',
+                'code.jquery.com',
+                'maxcdn.bootstrapcdn.com',
+                'stackpath.bootstrapcdn.com',
+                'use.fontawesome.com',
+                'www.googletagmanager.com',
+                'www.google-analytics.com',
+                'connect.facebook.net',
+                'platform.twitter.com',
+                'www.youtube.com',
+                'i.ytimg.com',
+                's.ytimg.com'
+            ];
+
+            // Extract domains from links on the page
+            const pageDomains = new Set();
+            document.querySelectorAll('a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+                try {
+                    const url = new URL(el.href || el.src);
+                    if (url.hostname !== location.hostname) {
+                        pageDomains.add(url.hostname);
+                    }
+                } catch (e) {}
+            });
+
+            // Combine common domains with page-specific domains
+            const allDomains = [...new Set([...commonDomains, ...Array.from(pageDomains)])];
+
+            // Create DNS prefetch links
+            allDomains.forEach(domain => {
+                const link = document.createElement('link');
+                link.rel = 'dns-prefetch';
+                link.href = `//${domain}`;
+                
+                if (document.head) {
+                    document.head.appendChild(link);
+                } else {
+                    const observer = new MutationObserver(() => {
+                        if (document.head) {
+                            document.head.appendChild(link);
+                            observer.disconnect();
+                        }
+                    });
+                    observer.observe(document.documentElement, { childList: true });
+                }
+            });
+
+            this.log.info(`DNS prefetch enabled for ${allDomains.length} domains`);
+        },
+
+        /****************************
          * DIAGNOSTICS
          ****************************/
         toggleDiagnostics() {
@@ -307,7 +431,7 @@
         updateDiagnostics() {
             if (!this.config.diagnosticsPanel || !this.diagPanel) return;
             this.diagPanel.innerHTML = `
-                <b>WebPerf v5.3</b><br>
+                <b>WebPerf v5.4</b><br>
                 FPS: ${this.fpsTarget}<br>
                 Cache Hits: ${this.diagnostics.cacheHits}<br>
                 Cache Misses: ${this.diagnostics.cacheMisses}<br>
