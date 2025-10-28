@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Web Performance Suite v5.5
+// @name         Web Performance Suite v6.0
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      5.5
-// @description  Ultra-fast page loads: resource hints, preconnect, preload, font optimization, script deferral, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching.
+// @version      6.0
+// @description  Ultra-fast page loads: resource hints, preconnect, preload, font optimization, script deferral, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching. Enhanced with per-domain settings, smarter caching, and lightweight telemetry.
 // @author       You
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
@@ -20,16 +20,41 @@
 // @supportURL   https://github.com/RyAnPr1ME/webperf/issues
 // ==/UserScript==
 
+/**
+ * Web Performance Suite v6.0
+ * 
+ * A comprehensive userscript for optimizing web page performance through:
+ * - Resource hints (preconnect, dns-prefetch, preload)
+ * - Smart caching with LRU eviction and TTL
+ * - Adaptive FPS throttling
+ * - Image optimization and lazy loading
+ * - Script deferral and optimization
+ * - Hardware acceleration
+ * - Per-domain configuration
+ * - Lightweight performance telemetry
+ * 
+ * @module WebPerformanceSuite
+ */
 (() => {
     'use strict';
 
-    const WebPerf = {
-        config: {
+    /**
+     * Core configuration management module
+     * Handles global and per-domain settings with GM storage persistence
+     * @namespace ConfigManager
+     */
+    const ConfigManager = {
+        /**
+         * Default global configuration
+         * @type {Object}
+         */
+        defaults: {
+            // Core features
             imageRewriter: true,
             smartCache: true,
             adaptiveFPS: true,
             parallelPrefetch: true,
-            workerAnalyzer: true,
+            workerAnalyzer: false,  // Disabled by default for stability
             diagnosticsPanel: true,
             lazyLoadMedia: true,
             hardwareAccel: true,
@@ -39,708 +64,1841 @@
             fontOptimization: true,
             aggressiveDefer: true,
             reduceReflows: true,
+            telemetry: true,  // NEW: Lightweight performance telemetry
+            
+            // Advanced settings
             imageFormats: ['jpg', 'jpeg', 'png'],
             preferFormat: 'webp',
             backgroundFps: 12,
             activeFps: 60,
             cacheSizeLimitMB: 120,
+            cacheMaxAge: 3600000,  // NEW: 1 hour cache TTL
             parallelPrefetchCount: 6,
             maxConcurrentFetches: 6,
+            
+            // Safety settings - NEW
+            safeMode: false,  // If true, disables aggressive optimizations
+            maxObservers: 3,  // Limit number of concurrent observers
+            
+            // Domain settings - NEW
+            whitelist: [],  // Domains to always enable on
+            blacklist: [],  // Domains to always disable on
         },
 
-        diagnostics: { cacheHits: 0, cacheMisses: 0, rewrittenImages: 0 },
-        memCache: new Map(),
-        totalCacheBytes: 0,
-        diagPanel: null,
-        fpsTarget: 60,
-        menuCommands: [],
-        nativeRAF: window.requestAnimationFrame,
+        /**
+         * Current active configuration (merged from defaults and overrides)
+         * @type {Object}
+         */
+        config: {},
 
-        log: {
-            info: msg => console.log('%c[WebPerf] ' + msg, 'color: lime; font-weight: bold;'),
-            warn: msg => console.warn('[WebPerf] ' + msg),
-            debug: msg => console.debug('[WebPerf] ' + msg)
-        },
+        /**
+         * Per-domain configuration overrides
+         * @type {Map<string, Object>}
+         */
+        domainConfig: new Map(),
 
-        init() {
-            // Wait for document to be ready if needed
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', () => this.initFeatures());
-            } else {
-                this.initFeatures();
+        /**
+         * Initialize configuration system
+         * Loads saved settings from GM storage
+         */
+        async init() {
+            try {
+                // Load global config
+                const savedConfig = await this.loadFromStorage('webperf_config');
+                this.config = { ...this.defaults, ...savedConfig };
+
+                // Load domain-specific configs
+                const domainConfigs = await this.loadFromStorage('webperf_domain_configs') || {};
+                this.domainConfig = new Map(Object.entries(domainConfigs));
+
+                // Apply domain-specific overrides
+                const domain = this.getCurrentDomain();
+                if (this.domainConfig.has(domain)) {
+                    this.config = { ...this.config, ...this.domainConfig.get(domain) };
+                }
+
+                // Check whitelist/blacklist
+                if (this.config.blacklist.includes(domain)) {
+                    Logger.warn(`Domain ${domain} is blacklisted, disabling all features`);
+                    this.disableAllFeatures();
+                }
+            } catch (e) {
+                Logger.error('Failed to load config', e);
+                this.config = { ...this.defaults };
             }
         },
 
-        initFeatures() {
-            this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
-            this.registerMenu();
-            this.toggleDiagnostics();
-            this.overrideRAF();
-            this.observeImages();
-            this.observeLazyMedia();
-            this.initWorker();
-            this.prefetchAssets();
-            this.interceptScripts();
-            this.enableHardwareAcceleration();
-            this.enableDNSPrefetch();
-            this.enablePreconnect();
-            this.enablePreload();
-            this.optimizeFonts();
-            this.deferNonCriticalScripts();
-            this.reduceReflowsOptimization();
-            setInterval(() => this.updateDiagnostics(), 1000);
-
-            document.addEventListener('visibilitychange', () => {
-                this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
-            });
-
-            this.log.info('Web Performance Suite v5.5 initialized ⚡');
+        /**
+         * Get current domain
+         * @returns {string} Current domain name
+         */
+        getCurrentDomain() {
+            return window.location.hostname;
         },
 
-        registerMenu() {
-            // Check if GM_registerMenuCommand is available (Tampermonkey compatibility)
-            if (typeof GM_registerMenuCommand !== 'function') {
-                this.log.warn('Menu commands not available in this userscript manager');
-                return;
+        /**
+         * Load data from GM storage (with fallback)
+         * @param {string} key - Storage key
+         * @returns {Promise<any>} Stored value
+         */
+        async loadFromStorage(key) {
+            try {
+                if (typeof GM_getValue === 'function') {
+                    const value = GM_getValue(key);
+                    return value ? JSON.parse(value) : null;
+                }
+            } catch (e) {
+                Logger.debug('GM storage unavailable, using defaults', e);
             }
+            return null;
+        },
 
+        /**
+         * Save data to GM storage (with fallback)
+         * @param {string} key - Storage key
+         * @param {any} value - Value to store
+         */
+        async saveToStorage(key, value) {
+            try {
+                if (typeof GM_setValue === 'function') {
+                    GM_setValue(key, JSON.stringify(value));
+                }
+            } catch (e) {
+                Logger.warn('Failed to save to storage', e);
+            }
+        },
+
+        /**
+         * Update configuration
+         * @param {Object} updates - Configuration updates
+         * @param {boolean} persist - Whether to persist to storage
+         */
+        async updateConfig(updates, persist = true) {
+            this.config = { ...this.config, ...updates };
+            if (persist) {
+                await this.saveToStorage('webperf_config', this.config);
+            }
+        },
+
+        /**
+         * Set domain-specific configuration
+         * @param {string} domain - Domain name
+         * @param {Object} config - Domain-specific config
+         */
+        async setDomainConfig(domain, config) {
+            this.domainConfig.set(domain, config);
+            const domainConfigs = Object.fromEntries(this.domainConfig);
+            await this.saveToStorage('webperf_domain_configs', domainConfigs);
+        },
+
+        /**
+         * Disable all features (for blacklisted domains)
+         */
+        disableAllFeatures() {
             Object.keys(this.config).forEach(key => {
                 if (typeof this.config[key] === 'boolean') {
-                    try {
-                        const cmd = GM_registerMenuCommand(`${this.config[key] ? 'Disable' : 'Enable'} ${key}`, () => {
-                            this.toggleFeature(key);
-                        });
-                        this.menuCommands.push(cmd);
-                    } catch (e) {
-                        this.log.warn(`Failed to register menu command for ${key}: ${e.message}`);
-                    }
+                    this.config[key] = false;
                 }
             });
         },
 
-        toggleFeature(feature) {
-            this.config[feature] = !this.config[feature];
-            this.log.info(`${feature} is now ${this.config[feature] ? 'ON' : 'OFF'}`);
-            switch(feature) {
-                case 'adaptiveFPS': this.overrideRAF(); break;
-                case 'diagnosticsPanel': this.toggleDiagnostics(); break;
-                case 'imageRewriter': if (this.config.imageRewriter) this.observeImages(); break;
-                case 'lazyLoadMedia': if (this.config.lazyLoadMedia) this.observeLazyMedia(); break;
-                case 'hardwareAccel': this.enableHardwareAcceleration(); break;
-                case 'dnsPrefetch': this.enableDNSPrefetch(); break;
-                case 'preconnect': this.enablePreconnect(); break;
-                case 'preloadCritical': this.enablePreload(); break;
-                case 'fontOptimization': this.optimizeFonts(); break;
-                case 'aggressiveDefer': this.deferNonCriticalScripts(); break;
-                case 'reduceReflows': this.reduceReflowsOptimization(); break;
+        /**
+         * Get configuration value
+         * @param {string} key - Config key
+         * @returns {any} Configuration value
+         */
+        get(key) {
+            return this.config[key];
+        },
+
+        /**
+         * Check if feature is enabled
+         * @param {string} feature - Feature name
+         * @returns {boolean} True if enabled
+         */
+        isEnabled(feature) {
+            return this.config[feature] === true;
+        }
+    };
+
+    /**
+     * Logging module with severity levels
+     * @namespace Logger
+     */
+    const Logger = {
+        /**
+         * Log levels
+         * @enum {number}
+         */
+        levels: {
+            DEBUG: 0,
+            INFO: 1,
+            WARN: 2,
+            ERROR: 3
+        },
+
+        /**
+         * Current log level
+         * @type {number}
+         */
+        currentLevel: 1,  // INFO by default
+
+        /**
+         * Format log message
+         * @param {string} level - Log level
+         * @param {string} message - Message
+         * @returns {string} Formatted message
+         */
+        format(level, message) {
+            return `[WebPerf v6.0][${level}] ${message}`;
+        },
+
+        /**
+         * Debug log
+         * @param {string} msg - Message
+         * @param {...any} args - Additional arguments
+         */
+        debug(msg, ...args) {
+            if (this.currentLevel <= this.levels.DEBUG) {
+                console.debug(this.format('DEBUG', msg), ...args);
             }
         },
 
-        /****************************
-         * IMAGE INTERCEPTION
-         ****************************/
-        observeImages() {
-            if (!this.config.imageRewriter) return;
-            const optimize = async img => {
-                try {
-                    if (!img.src) return;
-                    const url = new URL(img.src, location.href);
-                    const ext = url.pathname.split('.').pop().toLowerCase();
-                    if (!this.config.imageFormats.includes(ext)) return;
-
-                    const newUrl = url.href.replace(new RegExp(`\\.${ext}$`, 'i'), `.${this.config.preferFormat}`);
-                    const cachedUrl = await this.cacheFetch(newUrl);
-                    img.src = cachedUrl;
-                    this.diagnostics.rewrittenImages++;
-                } catch (e) { this.log.warn(`Image rewrite failed: ${e}`); }
-            };
-
-            document.querySelectorAll('img').forEach(optimize);
-
-            // Wait for body to exist before observing
-            const startObserver = () => {
-                if (!document.body) {
-                    setTimeout(startObserver, 100);
-                    return;
-                }
-                const observer = new MutationObserver(mutations => {
-                    for (const m of mutations) {
-                        m.addedNodes.forEach(node => {
-                            if (node.tagName === 'IMG') optimize(node);
-                            if (node.querySelectorAll) node.querySelectorAll('img').forEach(optimize);
-                        });
-                    }
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-            };
-            startObserver();
-        },
-
-        /****************************
-         * LAZY LOAD MEDIA
-         ****************************/
-        observeLazyMedia() {
-            if (!this.config.lazyLoadMedia || !('IntersectionObserver' in window)) return;
-
-            const io = new IntersectionObserver(entries => {
-                entries.forEach(entry => {
-                    if (!entry.isIntersecting) return;
-                    const el = entry.target;
-                    if (el.dataset.src) el.src = el.dataset.src;
-                    if (el.dataset.srcset) el.srcset = el.dataset.srcset;
-                    io.unobserve(el);
-                });
-            });
-
-            document.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
-
-            // Wait for body to exist before observing
-            const startObserver = () => {
-                if (!document.body) {
-                    setTimeout(startObserver, 100);
-                    return;
-                }
-                const observer = new MutationObserver(mutations => {
-                    for (const m of mutations) {
-                        m.addedNodes.forEach(node => {
-                            if (!node.querySelectorAll) return;
-                            node.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
-                        });
-                    }
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-            };
-            startObserver();
-        },
-
-        /****************************
-         * SMART CACHE
-         ****************************/
-        async cacheFetch(url) {
-            if (!this.config.smartCache) return url;
-            if (this.memCache.has(url)) {
-                const entry = this.memCache.get(url);
-                this.memCache.delete(url);
-                this.memCache.set(url, entry);
-                this.diagnostics.cacheHits++;
-                return entry.objUrl;
+        /**
+         * Info log
+         * @param {string} msg - Message
+         */
+        info(msg) {
+            if (this.currentLevel <= this.levels.INFO) {
+                console.log('%c' + this.format('INFO', msg), 'color: lime; font-weight: bold;');
             }
+        },
+
+        /**
+         * Warning log
+         * @param {string} msg - Message
+         * @param {...any} args - Additional arguments
+         */
+        warn(msg, ...args) {
+            if (this.currentLevel <= this.levels.WARN) {
+                console.warn(this.format('WARN', msg), ...args);
+            }
+        },
+
+        /**
+         * Error log
+         * @param {string} msg - Message
+         * @param {Error} err - Error object
+         */
+        error(msg, err) {
+            console.error(this.format('ERROR', msg), err);
+        }
+    };
+
+    /**
+     * Performance telemetry module
+     * Collects lightweight metrics with minimal CPU overhead
+     * @namespace Telemetry
+     */
+    const Telemetry = {
+        /**
+         * Metrics storage
+         * @type {Object}
+         */
+        metrics: {
+            cacheHits: 0,
+            cacheMisses: 0,
+            rewrittenImages: 0,
+            deferredScripts: 0,
+            preconnectedDomains: 0,
+            preloadedResources: 0,
+            observerCount: 0,
+            startTime: performance.now()
+        },
+
+        /**
+         * Performance observer instance
+         * @type {PerformanceObserver}
+         */
+        perfObserver: null,
+
+        /**
+         * Initialize telemetry with PerformanceObserver
+         */
+        init() {
+            if (!ConfigManager.isEnabled('telemetry')) return;
 
             try {
-                const res = await fetch(url, { cache: 'force-cache' });
-                if (!res.ok) throw new Error(res.status);
-                const blob = await res.blob();
-                const objUrl = URL.createObjectURL(blob);
-                this.totalCacheBytes += blob.size;
-                this.memCache.set(url, { objUrl, size: blob.size });
-                this.pruneCache();
-                this.diagnostics.cacheMisses++;
-                return objUrl;
+                // Use PerformanceObserver for efficient metric collection
+                if ('PerformanceObserver' in window) {
+                    this.perfObserver = new PerformanceObserver((list) => {
+                        // Process performance entries during idle time
+                        SafeScheduler.idle(() => {
+                            for (const entry of list.getEntries()) {
+                                this.processPerformanceEntry(entry);
+                            }
+                        });
+                    });
+
+                    // Observe navigation and resource timing
+                    try {
+                        this.perfObserver.observe({ 
+                            entryTypes: ['navigation', 'resource', 'measure'] 
+                        });
+                    } catch (e) {
+                        Logger.debug('Some performance entry types not supported', e);
+                    }
+                }
             } catch (e) {
-                this.log.warn(`Cache fetch failed for ${url}: ${e}`);
-                return url;
+                Logger.warn('Failed to initialize telemetry', e);
             }
         },
 
-        pruneCache() {
-            const limit = this.config.cacheSizeLimitMB * 1024 * 1024;
-            while (this.totalCacheBytes > limit && this.memCache.size > 0) {
-                const oldestKey = this.memCache.keys().next().value;
-                const { objUrl, size } = this.memCache.get(oldestKey);
-                URL.revokeObjectURL(objUrl);
-                this.memCache.delete(oldestKey);
-                this.totalCacheBytes -= size;
+        /**
+         * Process performance entry
+         * @param {PerformanceEntry} entry - Performance entry
+         */
+        processPerformanceEntry(entry) {
+            // Lightweight processing - just track key metrics
+            if (entry.entryType === 'resource') {
+                // Track resource loading patterns
+                if (entry.name.includes('webp')) {
+                    this.metrics.rewrittenImages++;
+                }
             }
         },
 
-        /****************************
-         * ADAPTIVE FPS
-         ****************************/
-        overrideRAF() {
-            if (!this.config.adaptiveFPS) {
-                window.requestAnimationFrame = this.nativeRAF;
+        /**
+         * Increment metric
+         * @param {string} metric - Metric name
+         * @param {number} value - Increment value
+         */
+        increment(metric, value = 1) {
+            if (this.metrics.hasOwnProperty(metric)) {
+                this.metrics[metric] += value;
+            }
+        },
+
+        /**
+         * Get metric value
+         * @param {string} metric - Metric name
+         * @returns {number} Metric value
+         */
+        get(metric) {
+            return this.metrics[metric] || 0;
+        },
+
+        /**
+         * Get all metrics
+         * @returns {Object} All metrics
+         */
+        getAll() {
+            return { ...this.metrics };
+        },
+
+        /**
+         * Get uptime in seconds
+         * @returns {number} Uptime
+         */
+        getUptime() {
+            return Math.floor((performance.now() - this.metrics.startTime) / 1000);
+        },
+
+        /**
+         * Cleanup telemetry
+         */
+        cleanup() {
+            if (this.perfObserver) {
+                this.perfObserver.disconnect();
+                this.perfObserver = null;
+            }
+        }
+    };
+
+    /**
+     * Safe scheduler for async operations
+     * Uses requestIdleCallback with fallbacks
+     * @namespace SafeScheduler
+     */
+    const SafeScheduler = {
+        /**
+         * Schedule task during idle time
+         * @param {Function} task - Task to execute
+         * @param {Object} options - Scheduling options
+         */
+        idle(task, options = {}) {
+            const { timeout = 2000 } = options;
+            
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(task, { timeout });
+            } else {
+                // Fallback to setTimeout
+                setTimeout(task, 1);
+            }
+        },
+
+        /**
+         * Schedule task in next animation frame
+         * @param {Function} task - Task to execute
+         */
+        frame(task) {
+            requestAnimationFrame(task);
+        },
+
+        /**
+         * Debounce function execution
+         * @param {Function} func - Function to debounce
+         * @param {number} wait - Wait time in ms
+         * @returns {Function} Debounced function
+         */
+        debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        },
+
+        /**
+         * Throttle function execution
+         * @param {Function} func - Function to throttle
+         * @param {number} limit - Time limit in ms
+         * @returns {Function} Throttled function
+         */
+        throttle(func, limit) {
+            let inThrottle;
+            return function(...args) {
+                if (!inThrottle) {
+                    func.apply(this, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            };
+        }
+    };
+
+    /**
+     * Smart cache with LRU eviction and TTL support
+     * @namespace CacheManager
+     */
+    const CacheManager = {
+        /**
+         * Cache storage (LRU Map)
+         * @type {Map<string, Object>}
+         */
+        cache: new Map(),
+
+        /**
+         * Total cache size in bytes
+         * @type {number}
+         */
+        totalBytes: 0,
+
+        /**
+         * Cache statistics
+         * @type {Object}
+         */
+        stats: {
+            hits: 0,
+            misses: 0,
+            evictions: 0
+        },
+
+        /**
+         * Initialize cache
+         */
+        init() {
+            // Monitor memory pressure if available
+            if ('memory' in performance) {
+                setInterval(() => this.checkMemoryPressure(), 30000);
+            }
+        },
+
+        /**
+         * Get item from cache
+         * @param {string} key - Cache key
+         * @returns {string|null} Cached value or null
+         */
+        get(key) {
+            if (!ConfigManager.isEnabled('smartCache')) return null;
+
+            const entry = this.cache.get(key);
+            if (!entry) {
+                this.stats.misses++;
+                Telemetry.increment('cacheMisses');
+                return null;
+            }
+
+            // Check TTL
+            if (Date.now() - entry.timestamp > ConfigManager.get('cacheMaxAge')) {
+                this.delete(key);
+                this.stats.misses++;
+                Telemetry.increment('cacheMisses');
+                return null;
+            }
+
+            // Move to end (LRU)
+            this.cache.delete(key);
+            this.cache.set(key, entry);
+            
+            this.stats.hits++;
+            Telemetry.increment('cacheHits');
+            return entry.objUrl;
+        },
+
+        /**
+         * Set item in cache
+         * @param {string} key - Cache key
+         * @param {Blob} blob - Blob data
+         * @returns {string} Object URL
+         */
+        set(key, blob) {
+            const objUrl = URL.createObjectURL(blob);
+            const entry = {
+                objUrl,
+                size: blob.size,
+                timestamp: Date.now()
+            };
+
+            this.cache.set(key, entry);
+            this.totalBytes += blob.size;
+            
+            this.evict();
+            return objUrl;
+        },
+
+        /**
+         * Delete item from cache
+         * @param {string} key - Cache key
+         */
+        delete(key) {
+            const entry = this.cache.get(key);
+            if (entry) {
+                URL.revokeObjectURL(entry.objUrl);
+                this.totalBytes -= entry.size;
+                this.cache.delete(key);
+            }
+        },
+
+        /**
+         * Evict old entries based on LRU and size limit
+         */
+        evict() {
+            const limitBytes = ConfigManager.get('cacheSizeLimitMB') * 1024 * 1024;
+            
+            while (this.totalBytes > limitBytes && this.cache.size > 0) {
+                const oldestKey = this.cache.keys().next().value;
+                this.delete(oldestKey);
+                this.stats.evictions++;
+            }
+        },
+
+        /**
+         * Check memory pressure and reduce cache if needed
+         */
+        checkMemoryPressure() {
+            if (!('memory' in performance)) return;
+
+            const { usedJSHeapSize, jsHeapSizeLimit } = performance.memory;
+            const usage = usedJSHeapSize / jsHeapSizeLimit;
+
+            // If memory usage > 80%, aggressively prune cache
+            if (usage > 0.8) {
+                Logger.warn(`High memory pressure (${(usage * 100).toFixed(1)}%), pruning cache`);
+                const targetSize = this.cache.size / 2;
+                let count = 0;
+                
+                for (const key of this.cache.keys()) {
+                    if (count++ >= targetSize) break;
+                    this.delete(key);
+                }
+            }
+        },
+
+        /**
+         * Fetch and cache resource
+         * @param {string} url - Resource URL
+         * @returns {Promise<string>} Object URL or original URL
+         */
+        async fetch(url) {
+            // Check cache first
+            const cached = this.get(url);
+            if (cached) return cached;
+
+            try {
+                const response = await fetch(url, { cache: 'force-cache' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const blob = await response.blob();
+                return this.set(url, blob);
+            } catch (e) {
+                Logger.debug(`Cache fetch failed for ${url}`, e);
+                return url;  // Return original URL on failure
+            }
+        },
+
+        /**
+         * Get cache statistics
+         * @returns {Object} Cache stats
+         */
+        getStats() {
+            return {
+                ...this.stats,
+                size: this.cache.size,
+                bytes: this.totalBytes,
+                mb: (this.totalBytes / 1024 / 1024).toFixed(2)
+            };
+        },
+
+        /**
+         * Clear all cache
+         */
+        clear() {
+            for (const key of this.cache.keys()) {
+                this.delete(key);
+            }
+            this.stats = { hits: 0, misses: 0, evictions: 0 };
+        }
+    };
+
+    /**
+     * DOM helper utilities
+     * @namespace DOMHelper
+     */
+    const DOMHelper = {
+        /**
+         * Wait for element to exist
+         * @param {string} selector - CSS selector
+         * @param {number} timeout - Timeout in ms
+         * @returns {Promise<Element>} Element
+         */
+        waitForElement(selector, timeout = 5000) {
+            return new Promise((resolve, reject) => {
+                const element = document.querySelector(selector);
+                if (element) return resolve(element);
+
+                const observer = new MutationObserver(() => {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        observer.disconnect();
+                        clearTimeout(timer);
+                        resolve(el);
+                    }
+                });
+
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+
+                const timer = setTimeout(() => {
+                    observer.disconnect();
+                    reject(new Error(`Timeout waiting for ${selector}`));
+                }, timeout);
+            });
+        },
+
+        /**
+         * Safely append element to head
+         * @param {HTMLElement} element - Element to append
+         * @param {number} timeout - Timeout in ms
+         */
+        async appendToHead(element, timeout = 5000) {
+            try {
+                if (document.head) {
+                    document.head.appendChild(element);
+                    return;
+                }
+
+                await this.waitForElement('head', timeout);
+                document.head.appendChild(element);
+            } catch (e) {
+                Logger.debug('Failed to append to head', e);
+            }
+        },
+
+        /**
+         * Safely append element to body
+         * @param {HTMLElement} element - Element to append
+         * @param {number} timeout - Timeout in ms
+         */
+        async appendToBody(element, timeout = 5000) {
+            try {
+                if (document.body) {
+                    document.body.appendChild(element);
+                    return;
+                }
+
+                await this.waitForElement('body', timeout);
+                document.body.appendChild(element);
+            } catch (e) {
+                Logger.debug('Failed to append to body', e);
+            }
+        },
+
+        /**
+         * Create element with attributes
+         * @param {string} tag - Tag name
+         * @param {Object} attrs - Attributes
+         * @returns {HTMLElement} Created element
+         */
+        createElement(tag, attrs = {}) {
+            const el = document.createElement(tag);
+            Object.entries(attrs).forEach(([key, value]) => {
+                if (key === 'textContent') {
+                    el.textContent = value;
+                } else if (key === 'style' && typeof value === 'object') {
+                    Object.assign(el.style, value);
+                } else {
+                    el.setAttribute(key, value);
+                }
+            });
+            return el;
+        }
+    };
+
+    /**
+     * Observer manager to limit concurrent observers
+     * @namespace ObserverManager
+     */
+    const ObserverManager = {
+        /**
+         * Active observers
+         * @type {Set<MutationObserver>}
+         */
+        observers: new Set(),
+
+        /**
+         * Create and register observer
+         * @param {Function} callback - Observer callback
+         * @param {Node} target - Target node
+         * @param {Object} options - Observer options
+         * @returns {MutationObserver|null} Observer instance
+         */
+        create(callback, target, options) {
+            const maxObservers = ConfigManager.get('maxObservers');
+            
+            if (this.observers.size >= maxObservers) {
+                Logger.debug(`Max observers (${maxObservers}) reached, skipping`);
+                return null;
+            }
+
+            const observer = new MutationObserver(callback);
+            observer.observe(target, options);
+            this.observers.add(observer);
+            Telemetry.increment('observerCount');
+            
+            return observer;
+        },
+
+        /**
+         * Disconnect and remove observer
+         * @param {MutationObserver} observer - Observer to disconnect
+         */
+        disconnect(observer) {
+            if (observer) {
+                observer.disconnect();
+                this.observers.delete(observer);
+                Telemetry.increment('observerCount', -1);
+            }
+        },
+
+        /**
+         * Disconnect all observers
+         */
+        disconnectAll() {
+            for (const observer of this.observers) {
+                observer.disconnect();
+            }
+            this.observers.clear();
+            Telemetry.metrics.observerCount = 0;
+        }
+    };
+
+    /**
+     * Image optimization module
+     * @namespace ImageOptimizer
+     */
+    const ImageOptimizer = {
+        /**
+         * Optimized images set
+         * @type {WeakSet<HTMLImageElement>}
+         */
+        optimized: new WeakSet(),
+
+        /**
+         * Observer instance
+         * @type {MutationObserver}
+         */
+        observer: null,
+
+        /**
+         * Initialize image optimization
+         */
+        init() {
+            if (!ConfigManager.isEnabled('imageRewriter')) return;
+
+            // Optimize existing images
+            SafeScheduler.idle(() => {
+                document.querySelectorAll('img').forEach(img => this.optimize(img));
+            });
+
+            // Observe new images
+            SafeScheduler.idle(() => {
+                this.observeNewImages();
+            });
+        },
+
+        /**
+         * Observe new images being added to DOM
+         */
+        async observeNewImages() {
+            try {
+                await DOMHelper.waitForElement('body');
+                
+                this.observer = ObserverManager.create(
+                    SafeScheduler.debounce((mutations) => {
+                        for (const mutation of mutations) {
+                            for (const node of mutation.addedNodes) {
+                                if (node.tagName === 'IMG') {
+                                    this.optimize(node);
+                                } else if (node.querySelectorAll) {
+                                    node.querySelectorAll('img').forEach(img => this.optimize(img));
+                                }
+                            }
+                        }
+                    }, 100),
+                    document.body,
+                    { childList: true, subtree: true }
+                );
+            } catch (e) {
+                Logger.debug('Failed to observe images', e);
+            }
+        },
+
+        /**
+         * Optimize single image
+         * @param {HTMLImageElement} img - Image element
+         */
+        async optimize(img) {
+            if (!img || !img.src || this.optimized.has(img)) return;
+
+            try {
+                const url = new URL(img.src, location.href);
+                const ext = url.pathname.split('.').pop().toLowerCase();
+                
+                if (!ConfigManager.get('imageFormats').includes(ext)) return;
+
+                const preferFormat = ConfigManager.get('preferFormat');
+                const newUrl = url.href.replace(new RegExp(`\\.${ext}$`, 'i'), `.${preferFormat}`);
+                
+                const cachedUrl = await CacheManager.fetch(newUrl);
+                img.src = cachedUrl;
+                
+                this.optimized.add(img);
+                Telemetry.increment('rewrittenImages');
+            } catch (e) {
+                Logger.debug('Image optimization failed', e);
+            }
+        },
+
+        /**
+         * Cleanup
+         */
+        cleanup() {
+            ObserverManager.disconnect(this.observer);
+            this.observer = null;
+        }
+    };
+
+    /**
+     * Lazy loading module
+     * @namespace LazyLoader
+     */
+    const LazyLoader = {
+        /**
+         * Intersection observer instance
+         * @type {IntersectionObserver}
+         */
+        observer: null,
+
+        /**
+         * Initialize lazy loading
+         */
+        init() {
+            if (!ConfigManager.isEnabled('lazyLoadMedia')) return;
+            if (!('IntersectionObserver' in window)) {
+                Logger.warn('IntersectionObserver not supported');
                 return;
             }
 
-            let lastFrame = 0;
-            const rafWrapper = cb => {
+            this.observer = new IntersectionObserver(
+                (entries) => {
+                    for (const entry of entries) {
+                        if (entry.isIntersecting) {
+                            this.loadElement(entry.target);
+                            this.observer.unobserve(entry.target);
+                        }
+                    }
+                },
+                { rootMargin: '50px' }  // Start loading slightly before visible
+            );
+
+            // Observe existing elements
+            SafeScheduler.idle(() => {
+                this.observeElements();
+            });
+        },
+
+        /**
+         * Observe lazy-loadable elements
+         */
+        observeElements() {
+            const selector = 'img[data-src], img[data-srcset], video[data-src]';
+            document.querySelectorAll(selector).forEach(el => {
+                this.observer.observe(el);
+            });
+        },
+
+        /**
+         * Load lazy element
+         * @param {HTMLElement} el - Element to load
+         */
+        loadElement(el) {
+            if (el.dataset.src) {
+                el.src = el.dataset.src;
+                delete el.dataset.src;
+            }
+            if (el.dataset.srcset) {
+                el.srcset = el.dataset.srcset;
+                delete el.dataset.srcset;
+            }
+        },
+
+        /**
+         * Cleanup
+         */
+        cleanup() {
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+            }
+        }
+    };
+
+    /**
+     * FPS throttling module
+     * @namespace FPSManager
+     */
+    const FPSManager = {
+        /**
+         * Native requestAnimationFrame
+         * @type {Function}
+         */
+        nativeRAF: window.requestAnimationFrame,
+
+        /**
+         * Current FPS target
+         * @type {number}
+         */
+        fpsTarget: 60,
+
+        /**
+         * Last frame timestamp
+         * @type {number}
+         */
+        lastFrame: 0,
+
+        /**
+         * Initialize FPS management
+         */
+        init() {
+            if (!ConfigManager.isEnabled('adaptiveFPS')) return;
+
+            this.updateFPSTarget();
+            this.overrideRAF();
+
+            // Update FPS on visibility change
+            document.addEventListener('visibilitychange', () => {
+                this.updateFPSTarget();
+            });
+        },
+
+        /**
+         * Update FPS target based on visibility
+         */
+        updateFPSTarget() {
+            this.fpsTarget = document.hidden 
+                ? ConfigManager.get('backgroundFps')
+                : ConfigManager.get('activeFps');
+            
+            Logger.debug(`FPS target: ${this.fpsTarget}`);
+        },
+
+        /**
+         * Override requestAnimationFrame with throttled version
+         */
+        overrideRAF() {
+            const rafWrapper = (callback) => {
                 const now = performance.now();
                 const interval = 1000 / this.fpsTarget;
-                if (now - lastFrame >= interval) {
-                    lastFrame = now;
-                    return this.nativeRAF(cb);
+                
+                if (now - this.lastFrame >= interval) {
+                    this.lastFrame = now;
+                    return this.nativeRAF(callback);
                 } else {
-                    return setTimeout(() => rafWrapper(cb), interval - (now - lastFrame));
+                    const delay = interval - (now - this.lastFrame);
+                    return setTimeout(() => rafWrapper(callback), delay);
                 }
             };
 
             window.requestAnimationFrame = rafWrapper;
         },
 
-        /****************************
-         * SCRIPT/STYLE INTERCEPTION
-         ****************************/
-        interceptScripts() {
-            // Wait for head to exist before observing
-            const startObserver = () => {
-                if (!document.head) {
-                    setTimeout(startObserver, 100);
-                    return;
-                }
-                const observer = new MutationObserver(mutations => {
-                    for (const m of mutations) {
-                        m.addedNodes.forEach(node => {
-                            if (node.tagName === 'SCRIPT' && !node.type) {
-                                node.type = 'text/blocked-js';
-                                this.log.debug(`Blocked script: ${node.src || 'inline'}`);
-                            }
-                            if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
-                                node.media = 'print';
-                                node.onload = () => node.media = 'all';
-                            }
-                        });
-                    }
-                });
-                observer.observe(document.head, { childList: true });
-            };
-            startObserver();
-        },
+        /**
+         * Restore native RAF
+         */
+        restore() {
+            window.requestAnimationFrame = this.nativeRAF;
+        }
+    };
 
-        /****************************
-         * PREFETCHER
-         ****************************/
-        prefetchAssets() {
-            if (!this.config.parallelPrefetch) return;
-            const urls = [...document.querySelectorAll('a[href^="' + location.origin + '"]')]
-                .filter(a => a.offsetParent !== null)
-                .slice(0, this.config.parallelPrefetchCount)
-                .map(a => a.href);
+    /**
+     * Hardware acceleration module
+     * @namespace HardwareAccel
+     */
+    const HardwareAccel = {
+        /**
+         * Style element
+         * @type {HTMLStyleElement}
+         */
+        styleEl: null,
 
-            urls.forEach(url => {
-                const link = document.createElement('link');
-                link.rel = 'prefetch';
-                link.href = url;
-                link.as = 'document';
-                document.head.appendChild(link);
-            });
-        },
-
-        /****************************
-         * WORKER ANALYZER
-         ****************************/
-        initWorker() {
-            if (!this.config.workerAnalyzer || !window.Worker) return;
-
-            const blob = new Blob([`
-                self.onmessage = e => {
-                    const { type, html } = e.data;
-                    if (type === 'analyzeDOM') {
-                        const count = (html.match(/<img|<video|<iframe/gi) || []).length;
-                        self.postMessage({ type: 'domStats', count });
-                    } else if (type === 'compute') {
-                        let sum = 0; for (let i = 0; i < 5e6; i++) sum += i;
-                        self.postMessage({ type: 'computeDone', result: sum });
-                    }
-                };
-            `], { type: 'application/javascript' });
-
-            const worker = new Worker(URL.createObjectURL(blob));
-            worker.onmessage = e => {
-                if (e.data.type === 'domStats') this.log.info(`DOM contains ${e.data.count} media elements.`);
-                if (e.data.type === 'computeDone') this.log.info(`Worker compute complete: ${e.data.result}`);
-            };
-
-            setTimeout(() => {
-                worker.postMessage({ type: 'analyzeDOM', html: document.documentElement.outerHTML });
-                worker.postMessage({ type: 'compute' });
-            }, 2000);
-        },
-
-        /****************************
-         * HARDWARE ACCELERATION
-         ****************************/
-        appendToHead(element, timeoutMs = 5000) {
-            if (document.head) {
-                document.head.appendChild(element);
-                return;
-            }
-            
-            // Wait for document.head with timeout
-            let timeoutId;
-            const observer = new MutationObserver(() => {
-                if (document.head) {
-                    clearTimeout(timeoutId);
-                    document.head.appendChild(element);
-                    observer.disconnect();
-                }
-            });
-            
-            observer.observe(document.documentElement, { childList: true });
-            timeoutId = setTimeout(() => {
-                observer.disconnect();
-                this.log.warn('Timeout waiting for document.head');
-            }, timeoutMs);
-        },
-
-        enableHardwareAcceleration() {
-            if (!this.config.hardwareAccel) {
-                // Remove the style tag if it exists
-                const existing = document.getElementById('webperf-hw-accel');
-                if (existing) existing.remove();
+        /**
+         * Initialize hardware acceleration
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('hardwareAccel')) {
+                this.remove();
                 return;
             }
 
-            // Create and inject CSS to force hardware acceleration on key elements
-            const style = document.createElement('style');
-            style.id = 'webperf-hw-accel';
-            style.textContent = `
-                img, video, canvas, iframe {
-                    transform: translate3d(0, 0, 0);
-                    -webkit-transform: translate3d(0, 0, 0);
-                    backface-visibility: hidden;
-                    -webkit-backface-visibility: hidden;
-                }
+            this.styleEl = DOMHelper.createElement('style', {
+                id: 'webperf-hw-accel',
+                textContent: `
+                    /* Hardware acceleration optimizations */
+                    img, video, canvas, iframe {
+                        transform: translate3d(0, 0, 0);
+                        -webkit-transform: translate3d(0, 0, 0);
+                        backface-visibility: hidden;
+                        -webkit-backface-visibility: hidden;
+                    }
+                    
+                    [class*="animate"], [class*="transition"], 
+                    [style*="transform"], [style*="animation"] {
+                        transform: translateZ(0);
+                        -webkit-transform: translateZ(0);
+                        backface-visibility: hidden;
+                        -webkit-backface-visibility: hidden;
+                        perspective: 1000px;
+                        -webkit-perspective: 1000px;
+                    }
+                `
+            });
+
+            await DOMHelper.appendToHead(this.styleEl);
+            Logger.info('Hardware acceleration enabled');
+        },
+
+        /**
+         * Remove hardware acceleration
+         */
+        remove() {
+            if (this.styleEl) {
+                this.styleEl.remove();
+                this.styleEl = null;
+            }
+        }
+    };
+
+    /**
+     * DNS prefetch module
+     * @namespace DNSPrefetch
+     */
+    const DNSPrefetch = {
+        /**
+         * Common CDN and service domains
+         * @type {string[]}
+         */
+        commonDomains: [
+            'www.google.com',
+            'www.gstatic.com',
+            'fonts.googleapis.com',
+            'fonts.gstatic.com',
+            'ajax.googleapis.com',
+            'cdn.jsdelivr.net',
+            'cdnjs.cloudflare.com',
+            'unpkg.com'
+        ],
+
+        /**
+         * Initialize DNS prefetching
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('dnsPrefetch')) return;
+
+            SafeScheduler.idle(() => {
+                const domains = this.extractDomains();
+                const allDomains = [...new Set([...this.commonDomains, ...domains])];
                 
-                [class*="animate"], [class*="transition"], [style*="transform"], [style*="animation"] {
-                    transform: translateZ(0);
-                    -webkit-transform: translateZ(0);
-                    backface-visibility: hidden;
-                    -webkit-backface-visibility: hidden;
-                    perspective: 1000px;
-                    -webkit-perspective: 1000px;
-                }
-            `;
+                allDomains.forEach(domain => {
+                    const link = DOMHelper.createElement('link', {
+                        rel: 'dns-prefetch',
+                        href: `//${domain}`
+                    });
+                    DOMHelper.appendToHead(link);
+                });
+
+                Logger.info(`DNS prefetch: ${allDomains.length} domains`);
+            });
+        },
+
+        /**
+         * Extract external domains from page
+         * @returns {string[]} Array of domains
+         */
+        extractDomains() {
+            const domains = new Set();
+            const selector = 'a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]';
             
-            this.appendToHead(style);
-            this.log.info('Hardware acceleration enabled');
-        },
-
-        /****************************
-         * DNS PREFETCHING
-         ****************************/
-        enableDNSPrefetch() {
-            if (!this.config.dnsPrefetch) return;
-
-            // Common domains to prefetch
-            const commonDomains = [
-                'www.google.com',
-                'www.gstatic.com',
-                'fonts.googleapis.com',
-                'fonts.gstatic.com',
-                'ajax.googleapis.com',
-                'cdn.jsdelivr.net',
-                'cdnjs.cloudflare.com',
-                'unpkg.com',
-                'code.jquery.com',
-                'maxcdn.bootstrapcdn.com',
-                'stackpath.bootstrapcdn.com',
-                'use.fontawesome.com',
-                'www.googletagmanager.com',
-                'www.google-analytics.com',
-                'connect.facebook.net',
-                'platform.twitter.com',
-                'www.youtube.com',
-                'i.ytimg.com',
-                's.ytimg.com'
-            ];
-
-            // Extract domains from links on the page
-            const pageDomains = new Set();
-            document.querySelectorAll('a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+            document.querySelectorAll(selector).forEach(el => {
                 try {
                     const url = new URL(el.href || el.src);
                     if (url.hostname !== location.hostname) {
-                        pageDomains.add(url.hostname);
+                        domains.add(url.hostname);
                     }
                 } catch (e) {
-                    // Silently ignore invalid URLs - common with data: or javascript: URLs
+                    // Invalid URL, skip
                 }
             });
 
-            // Combine common domains with page-specific domains
-            const allDomains = [...new Set([...commonDomains, ...Array.from(pageDomains)])];
+            return Array.from(domains);
+        }
+    };
 
-            // Create DNS prefetch links
-            allDomains.forEach(domain => {
-                const link = document.createElement('link');
-                link.rel = 'dns-prefetch';
-                link.href = `//${domain}`;
-                this.appendToHead(link);
+    /**
+     * Preconnect module
+     * @namespace Preconnect
+     */
+    const Preconnect = {
+        /**
+         * Initialize preconnect
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('preconnect')) return;
+
+            SafeScheduler.idle(() => {
+                const origins = this.extractOrigins();
+                
+                // Limit to top 10 most important origins
+                origins.slice(0, 10).forEach(origin => {
+                    const link = DOMHelper.createElement('link', {
+                        rel: 'preconnect',
+                        href: origin,
+                        crossorigin: 'anonymous'
+                    });
+                    DOMHelper.appendToHead(link);
+                });
+
+                Telemetry.increment('preconnectedDomains', origins.length);
+                Logger.info(`Preconnect: ${Math.min(origins.length, 10)} origins`);
             });
-
-            this.log.info(`DNS prefetch enabled for ${allDomains.length} domains`);
         },
 
-        /****************************
-         * PRECONNECT OPTIMIZATION
-         ****************************/
-        enablePreconnect() {
-            if (!this.config.preconnect) return;
-
-            // Extract unique external domains from the page
-            const externalDomains = new Set();
-            document.querySelectorAll('link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+        /**
+         * Extract external origins from page
+         * @returns {string[]} Array of origins
+         */
+        extractOrigins() {
+            const origins = new Set();
+            const selector = 'link[href^="http"], script[src^="http"], img[src^="http"]';
+            
+            document.querySelectorAll(selector).forEach(el => {
                 try {
                     const url = new URL(el.href || el.src);
                     if (url.hostname !== location.hostname) {
-                        externalDomains.add(url.origin);
+                        origins.add(url.origin);
                     }
                 } catch (e) {
-                    // Silently ignore invalid URLs
+                    // Invalid URL, skip
                 }
             });
 
-            // Add preconnect for external domains to establish early connections
-            Array.from(externalDomains).slice(0, 10).forEach(origin => {
-                const link = document.createElement('link');
-                link.rel = 'preconnect';
-                link.href = origin;
-                link.crossOrigin = 'anonymous';
-                this.appendToHead(link);
-            });
+            return Array.from(origins);
+        }
+    };
 
-            this.log.info(`Preconnect enabled for ${Math.min(externalDomains.size, 10)} domains`);
+    /**
+     * Critical resource preloading module
+     * @namespace PreloadCritical
+     */
+    const PreloadCritical = {
+        /**
+         * Initialize critical resource preloading
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('preloadCritical')) return;
+
+            SafeScheduler.idle(() => {
+                this.preloadCSS();
+                this.preloadVisibleImages();
+            });
         },
 
-        /****************************
-         * PRELOAD CRITICAL RESOURCES
-         ****************************/
-        enablePreload() {
-            if (!this.config.preloadCritical) return;
-
-            // Preload critical CSS files
-            document.querySelectorAll('link[rel="stylesheet"]').forEach((link, index) => {
-                if (index < 3) { // Only first 3 stylesheets are considered critical
-                    const preloadLink = document.createElement('link');
-                    preloadLink.rel = 'preload';
-                    preloadLink.as = 'style';
-                    preloadLink.href = link.href;
-                    this.appendToHead(preloadLink);
+        /**
+         * Preload critical CSS files
+         */
+        preloadCSS() {
+            const stylesheets = document.querySelectorAll('link[rel="stylesheet"]');
+            let count = 0;
+            
+            stylesheets.forEach((link, index) => {
+                if (index < 3 && link.href) {  // First 3 are critical
+                    const preload = DOMHelper.createElement('link', {
+                        rel: 'preload',
+                        as: 'style',
+                        href: link.href
+                    });
+                    DOMHelper.appendToHead(preload);
+                    count++;
                 }
             });
 
-            // Preload visible images
-            const visibleImages = Array.from(document.querySelectorAll('img[src]'))
+            Telemetry.increment('preloadedResources', count);
+        },
+
+        /**
+         * Preload visible images (above the fold)
+         */
+        preloadVisibleImages() {
+            const images = Array.from(document.querySelectorAll('img[src]'))
                 .filter(img => {
-                    const rect = img.getBoundingClientRect();
-                    return rect.top < window.innerHeight && rect.bottom > 0;
+                    try {
+                        const rect = img.getBoundingClientRect();
+                        return rect.top < window.innerHeight && rect.bottom > 0;
+                    } catch (e) {
+                        return false;
+                    }
                 })
                 .slice(0, 5);
 
-            visibleImages.forEach(img => {
-                const preloadLink = document.createElement('link');
-                preloadLink.rel = 'preload';
-                preloadLink.as = 'image';
-                preloadLink.href = img.src;
-                this.appendToHead(preloadLink);
+            images.forEach(img => {
+                const preload = DOMHelper.createElement('link', {
+                    rel: 'preload',
+                    as: 'image',
+                    href: img.src
+                });
+                DOMHelper.appendToHead(preload);
             });
 
-            this.log.info('Critical resource preloading enabled');
+            Telemetry.increment('preloadedResources', images.length);
+            Logger.info(`Preloaded ${images.length} visible images`);
+        }
+    };
+
+    /**
+     * Font optimization module
+     * @namespace FontOptimizer
+     */
+    const FontOptimizer = {
+        /**
+         * Style element
+         * @type {HTMLStyleElement}
+         */
+        styleEl: null,
+
+        /**
+         * Initialize font optimization
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('fontOptimization')) return;
+
+            // Add font-display: swap globally
+            this.styleEl = DOMHelper.createElement('style', {
+                id: 'webperf-font-opt',
+                textContent: `
+                    @font-face {
+                        font-display: swap;
+                    }
+                `
+            });
+
+            await DOMHelper.appendToHead(this.styleEl);
+
+            // Optimize Google Fonts links
+            SafeScheduler.idle(() => {
+                this.optimizeFontLinks();
+            });
+
+            Logger.info('Font optimization enabled');
         },
 
-        /****************************
-         * FONT OPTIMIZATION
-         ****************************/
-        optimizeFonts() {
-            if (!this.config.fontOptimization) return;
-
-            // Add font-display: swap to all @font-face rules
-            const style = document.createElement('style');
-            style.id = 'webperf-font-opt';
-            style.textContent = `
-                @font-face {
-                    font-display: swap;
-                }
-            `;
-            this.appendToHead(style);
-
-            // Observe and optimize font link tags
-            const optimizeFontLink = (link) => {
-                if (link.href && link.href.includes('fonts')) {
-                    // Add font-display parameter for Google Fonts
-                    if (link.href.includes('fonts.googleapis.com')) {
+        /**
+         * Optimize font stylesheet links
+         */
+        optimizeFontLinks() {
+            document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+                if (link.href && link.href.includes('fonts.googleapis.com')) {
+                    try {
                         const url = new URL(link.href);
                         if (!url.searchParams.has('display')) {
                             url.searchParams.set('display', 'swap');
                             link.href = url.href;
                         }
+
+                        // Preconnect to font CDN
+                        const preconnect = DOMHelper.createElement('link', {
+                            rel: 'preconnect',
+                            href: url.origin,
+                            crossorigin: 'anonymous'
+                        });
+                        DOMHelper.appendToHead(preconnect);
+                    } catch (e) {
+                        Logger.debug('Failed to optimize font link', e);
                     }
-                    // Preconnect to font origins
-                    const preconnect = document.createElement('link');
-                    preconnect.rel = 'preconnect';
-                    preconnect.href = new URL(link.href).origin;
-                    preconnect.crossOrigin = 'anonymous';
-                    this.appendToHead(preconnect);
                 }
-            };
-
-            document.querySelectorAll('link[rel="stylesheet"]').forEach(optimizeFontLink);
-
-            this.log.info('Font optimization enabled');
-        },
-
-        /****************************
-         * AGGRESSIVE SCRIPT DEFERRAL
-         ****************************/
-        deferNonCriticalScripts() {
-            if (!this.config.aggressiveDefer) return;
-
-            // Use requestIdleCallback for non-critical operations
-            const scheduleIdleTask = (task) => {
-                if ('requestIdleCallback' in window) {
-                    requestIdleCallback(task, { timeout: 2000 });
-                } else {
-                    setTimeout(task, 1);
-                }
-            };
-
-            // Defer third-party scripts
-            const deferScript = (script) => {
-                if (!script.src) return;
-                
-                // Check if it's a third-party script
-                try {
-                    const url = new URL(script.src);
-                    if (url.hostname !== location.hostname) {
-                        if (!script.hasAttribute('defer') && !script.hasAttribute('async')) {
-                            script.defer = true;
-                            this.log.debug(`Deferred: ${script.src}`);
-                        }
-                    }
-                } catch (e) {}
-            };
-
-            // Defer analytics and tracking scripts specifically
-            scheduleIdleTask(() => {
-                document.querySelectorAll('script[src*="analytics"], script[src*="tracking"], script[src*="gtag"], script[src*="facebook"], script[src*="twitter"]').forEach(deferScript);
             });
-
-            this.log.info('Aggressive script deferral enabled');
-        },
-
-        /****************************
-         * REDUCE REFLOWS
-         ****************************/
-        reduceReflowsOptimization() {
-            if (!this.config.reduceReflows) return;
-
-            // Batch DOM reads and writes using requestAnimationFrame
-            let readQueue = [];
-            let writeQueue = [];
-            let scheduled = false;
-
-            const flush = () => {
-                // Read phase
-                readQueue.forEach(task => task());
-                readQueue = [];
-                
-                // Write phase
-                writeQueue.forEach(task => task());
-                writeQueue = [];
-                
-                scheduled = false;
-            };
-
-            // Expose batching API
-            window.webPerfBatch = {
-                read: (task) => {
-                    readQueue.push(task);
-                    if (!scheduled) {
-                        scheduled = true;
-                        requestAnimationFrame(flush);
-                    }
-                },
-                write: (task) => {
-                    writeQueue.push(task);
-                    if (!scheduled) {
-                        scheduled = true;
-                        requestAnimationFrame(flush);
-                    }
-                }
-            };
-
-            // Optimize common reflow-causing operations
-            const style = document.createElement('style');
-            style.id = 'webperf-reflow-opt';
-            style.textContent = `
-                /* Reduce layout thrashing */
-                * {
-                    will-change: auto;
-                }
-                
-                /* Contain layout where possible */
-                img, video, iframe {
-                    contain: layout;
-                }
-                
-                /* Use content-visibility for off-screen content */
-                .webperf-lazy-section {
-                    content-visibility: auto;
-                }
-            `;
-            this.appendToHead(style);
-
-            this.log.info('Reflow reduction optimizations enabled');
-        },
-
-        /****************************
-         * DIAGNOSTICS
-         ****************************/
-        toggleDiagnostics() {
-            if (!this.config.diagnosticsPanel) {
-                if (this.diagPanel) this.diagPanel.remove();
-                this.diagPanel = null;
-                return;
-            }
-
-            if (!this.diagPanel) {
-                this.diagPanel = document.createElement('div');
-                Object.assign(this.diagPanel.style, {
-                    position: 'fixed', bottom: '8px', right: '8px',
-                    background: 'rgba(0,0,0,0.75)', color: '#0f0',
-                    padding: '6px 10px', fontSize: '12px', fontFamily: 'monospace',
-                    borderRadius: '6px', zIndex: 999999, pointerEvents: 'auto'
-                });
-                
-                // Wait for body to exist before appending
-                const appendPanel = () => {
-                    if (!document.body) {
-                        setTimeout(appendPanel, 100);
-                        return;
-                    }
-                    document.body.appendChild(this.diagPanel);
-                };
-                appendPanel();
-            }
-        },
-
-        updateDiagnostics() {
-            if (!this.config.diagnosticsPanel || !this.diagPanel) return;
-            this.diagPanel.innerHTML = `
-                <b>WebPerf v5.5</b><br>
-                FPS: ${this.fpsTarget}<br>
-                Cache Hits: ${this.diagnostics.cacheHits}<br>
-                Cache Misses: ${this.diagnostics.cacheMisses}<br>
-                Images Rewritten: ${this.diagnostics.rewrittenImages}<br>
-                Memory Cache: ${(this.totalCacheBytes / 1024 / 1024).toFixed(2)} MB
-            `;
         }
     };
 
-    // Initialize with error handling for Tampermonkey compatibility
-    try {
-        WebPerf.init();
-    } catch (e) {
-        console.error('[WebPerf] Initialization failed:', e);
-        // Attempt graceful degradation - try initializing after page load
-        if (document.readyState === 'loading') {
-            window.addEventListener('load', () => {
-                try {
-                    WebPerf.init();
-                } catch (err) {
-                    console.error('[WebPerf] Second initialization attempt failed:', err);
+    /**
+     * Script deferral module
+     * @namespace ScriptDeferral
+     */
+    const ScriptDeferral = {
+        /**
+         * Initialize script deferral
+         */
+        init() {
+            if (!ConfigManager.isEnabled('aggressiveDefer')) return;
+
+            SafeScheduler.idle(() => {
+                this.deferThirdPartyScripts();
+            });
+
+            Logger.info('Script deferral enabled');
+        },
+
+        /**
+         * Defer third-party scripts
+         */
+        deferThirdPartyScripts() {
+            const scripts = document.querySelectorAll('script[src]');
+            let deferred = 0;
+            
+            scripts.forEach(script => {
+                if (this.isThirdParty(script.src)) {
+                    if (!script.hasAttribute('defer') && !script.hasAttribute('async')) {
+                        script.defer = true;
+                        deferred++;
+                        Logger.debug(`Deferred: ${script.src}`);
+                    }
                 }
             });
+
+            Telemetry.increment('deferredScripts', deferred);
+        },
+
+        /**
+         * Check if script is third-party
+         * @param {string} src - Script source URL
+         * @returns {boolean} True if third-party
+         */
+        isThirdParty(src) {
+            try {
+                const url = new URL(src, location.href);
+                return url.hostname !== location.hostname;
+            } catch (e) {
+                return false;
+            }
         }
-    }
+    };
+
+    /**
+     * Reflow reduction module
+     * @namespace ReflowOptimizer
+     */
+    const ReflowOptimizer = {
+        /**
+         * Read queue
+         * @type {Function[]}
+         */
+        readQueue: [],
+
+        /**
+         * Write queue
+         * @type {Function[]}
+         */
+        writeQueue: [],
+
+        /**
+         * Flush scheduled flag
+         * @type {boolean}
+         */
+        scheduled: false,
+
+        /**
+         * Style element
+         * @type {HTMLStyleElement}
+         */
+        styleEl: null,
+
+        /**
+         * Initialize reflow optimization
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('reduceReflows')) return;
+
+            // Expose batching API
+            window.webPerfBatch = {
+                read: (task) => this.scheduleRead(task),
+                write: (task) => this.scheduleWrite(task)
+            };
+
+            // Apply CSS optimizations
+            this.styleEl = DOMHelper.createElement('style', {
+                id: 'webperf-reflow-opt',
+                textContent: `
+                    /* Reduce layout thrashing */
+                    img, video, iframe {
+                        contain: layout;
+                    }
+                    
+                    /* Content visibility for off-screen content */
+                    .webperf-lazy-section {
+                        content-visibility: auto;
+                    }
+                `
+            });
+
+            await DOMHelper.appendToHead(this.styleEl);
+            Logger.info('Reflow optimization enabled');
+        },
+
+        /**
+         * Schedule read task
+         * @param {Function} task - Read task
+         */
+        scheduleRead(task) {
+            this.readQueue.push(task);
+            this.scheduleFlush();
+        },
+
+        /**
+         * Schedule write task
+         * @param {Function} task - Write task
+         */
+        scheduleWrite(task) {
+            this.writeQueue.push(task);
+            this.scheduleFlush();
+        },
+
+        /**
+         * Schedule flush
+         */
+        scheduleFlush() {
+            if (!this.scheduled) {
+                this.scheduled = true;
+                SafeScheduler.frame(() => this.flush());
+            }
+        },
+
+        /**
+         * Flush read/write queues
+         */
+        flush() {
+            // Read phase
+            this.readQueue.forEach(task => {
+                try {
+                    task();
+                } catch (e) {
+                    Logger.warn('Read task failed', e);
+                }
+            });
+            this.readQueue = [];
+
+            // Write phase
+            this.writeQueue.forEach(task => {
+                try {
+                    task();
+                } catch (e) {
+                    Logger.warn('Write task failed', e);
+                }
+            });
+            this.writeQueue = [];
+
+            this.scheduled = false;
+        }
+    };
+
+    /**
+     * Parallel prefetch module
+     * @namespace ParallelPrefetch
+     */
+    const ParallelPrefetch = {
+        /**
+         * Initialize parallel prefetching
+         */
+        init() {
+            if (!ConfigManager.isEnabled('parallelPrefetch')) return;
+
+            SafeScheduler.idle(() => {
+                this.prefetchLinks();
+            });
+        },
+
+        /**
+         * Prefetch same-origin links
+         */
+        prefetchLinks() {
+            const links = Array.from(document.querySelectorAll('a[href]'))
+                .filter(a => {
+                    try {
+                        const url = new URL(a.href, location.href);
+                        return url.origin === location.origin && a.offsetParent !== null;
+                    } catch (e) {
+                        return false;
+                    }
+                })
+                .slice(0, ConfigManager.get('parallelPrefetchCount'));
+
+            links.forEach(anchor => {
+                const link = DOMHelper.createElement('link', {
+                    rel: 'prefetch',
+                    href: anchor.href,
+                    as: 'document'
+                });
+                DOMHelper.appendToHead(link);
+            });
+
+            Logger.info(`Prefetched ${links.length} links`);
+        }
+    };
+
+    /**
+     * Diagnostics panel module
+     * @namespace DiagnosticsPanel
+     */
+    const DiagnosticsPanel = {
+        /**
+         * Panel element
+         * @type {HTMLDivElement}
+         */
+        panel: null,
+
+        /**
+         * Update interval ID
+         * @type {number}
+         */
+        updateInterval: null,
+
+        /**
+         * Initialize diagnostics panel
+         */
+        async init() {
+            if (!ConfigManager.isEnabled('diagnosticsPanel')) {
+                this.remove();
+                return;
+            }
+
+            this.panel = DOMHelper.createElement('div', {
+                id: 'webperf-diag',
+                style: {
+                    position: 'fixed',
+                    bottom: '8px',
+                    right: '8px',
+                    background: 'rgba(0, 0, 0, 0.85)',
+                    color: '#0f0',
+                    padding: '8px 12px',
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    borderRadius: '6px',
+                    zIndex: '999999',
+                    pointerEvents: 'auto',
+                    maxWidth: '250px',
+                    lineHeight: '1.4'
+                }
+            });
+
+            await DOMHelper.appendToBody(this.panel);
+
+            // Update every second
+            this.updateInterval = setInterval(() => this.update(), 1000);
+            this.update();
+        },
+
+        /**
+         * Update panel content
+         */
+        update() {
+            if (!this.panel) return;
+
+            const cacheStats = CacheManager.getStats();
+            const metrics = Telemetry.getAll();
+
+            this.panel.innerHTML = `
+                <strong>WebPerf v6.0</strong><br>
+                FPS: ${FPSManager.fpsTarget}<br>
+                Cache: ${cacheStats.hits}/${cacheStats.hits + cacheStats.misses} hits (${cacheStats.mb} MB)<br>
+                Images: ${metrics.rewrittenImages}<br>
+                Scripts: ${metrics.deferredScripts} deferred<br>
+                Observers: ${metrics.observerCount}<br>
+                Uptime: ${Telemetry.getUptime()}s
+            `;
+        },
+
+        /**
+         * Remove panel
+         */
+        remove() {
+            if (this.updateInterval) {
+                clearInterval(this.updateInterval);
+                this.updateInterval = null;
+            }
+            if (this.panel) {
+                this.panel.remove();
+                this.panel = null;
+            }
+        }
+    };
+
+    /**
+     * Menu manager module
+     * @namespace MenuManager
+     */
+    const MenuManager = {
+        /**
+         * Registered menu commands
+         * @type {Array}
+         */
+        commands: [],
+
+        /**
+         * Initialize menu
+         */
+        init() {
+            if (typeof GM_registerMenuCommand !== 'function') {
+                Logger.debug('Menu commands not available');
+                return;
+            }
+
+            try {
+                this.registerToggleCommands();
+                this.registerDomainCommands();
+            } catch (e) {
+                Logger.warn('Failed to register menu commands', e);
+            }
+        },
+
+        /**
+         * Register toggle commands for features
+         */
+        registerToggleCommands() {
+            const features = [
+                'imageRewriter', 'smartCache', 'adaptiveFPS', 'parallelPrefetch',
+                'diagnosticsPanel', 'lazyLoadMedia', 'hardwareAccel', 'dnsPrefetch',
+                'preconnect', 'preloadCritical', 'fontOptimization', 'aggressiveDefer',
+                'reduceReflows', 'telemetry'
+            ];
+
+            features.forEach(feature => {
+                const enabled = ConfigManager.isEnabled(feature);
+                const label = `${enabled ? '✓' : '✗'} ${feature}`;
+                
+                try {
+                    const cmd = GM_registerMenuCommand(label, async () => {
+                        await this.toggleFeature(feature);
+                    });
+                    this.commands.push(cmd);
+                } catch (e) {
+                    Logger.debug(`Failed to register ${feature}`, e);
+                }
+            });
+        },
+
+        /**
+         * Register domain-specific commands
+         */
+        registerDomainCommands() {
+            const domain = ConfigManager.getCurrentDomain();
+            
+            try {
+                const cmd1 = GM_registerMenuCommand('⚙️ Disable on this domain', async () => {
+                    const blacklist = ConfigManager.get('blacklist');
+                    blacklist.push(domain);
+                    await ConfigManager.updateConfig({ blacklist });
+                    location.reload();
+                });
+                this.commands.push(cmd1);
+
+                const cmd2 = GM_registerMenuCommand('🗑️ Clear cache', async () => {
+                    CacheManager.clear();
+                    Logger.info('Cache cleared');
+                });
+                this.commands.push(cmd2);
+            } catch (e) {
+                Logger.debug('Failed to register domain commands', e);
+            }
+        },
+
+        /**
+         * Toggle feature
+         * @param {string} feature - Feature name
+         */
+        async toggleFeature(feature) {
+            const newValue = !ConfigManager.isEnabled(feature);
+            await ConfigManager.updateConfig({ [feature]: newValue });
+            Logger.info(`${feature}: ${newValue ? 'ON' : 'OFF'}`);
+            location.reload();
+        }
+    };
+
+    /**
+     * Main application controller
+     * @namespace WebPerf
+     */
+    const WebPerf = {
+        /**
+         * Initialization flag
+         * @type {boolean}
+         */
+        initialized: false,
+
+        /**
+         * Initialize Web Performance Suite
+         */
+        async init() {
+            if (this.initialized) return;
+            this.initialized = true;
+
+            try {
+                Logger.info('Initializing Web Performance Suite v6.0...');
+
+                // Phase 1: Configuration
+                await ConfigManager.init();
+
+                // Phase 2: Core systems
+                CacheManager.init();
+                Telemetry.init();
+                ObserverManager.observers = new Set();
+
+                // Phase 3: Wait for DOM ready
+                await this.waitForDOM();
+
+                // Phase 4: Initialize features
+                await this.initializeFeatures();
+
+                // Phase 5: Setup menu
+                MenuManager.init();
+
+                Logger.info('Web Performance Suite v6.0 initialized ⚡');
+            } catch (e) {
+                Logger.error('Initialization failed', e);
+                this.attemptGracefulDegradation();
+            }
+        },
+
+        /**
+         * Wait for DOM to be ready
+         */
+        async waitForDOM() {
+            if (document.readyState !== 'loading') return;
+
+            return new Promise(resolve => {
+                document.addEventListener('DOMContentLoaded', resolve, { once: true });
+            });
+        },
+
+        /**
+         * Initialize all features
+         */
+        async initializeFeatures() {
+            // FPS management first (affects rendering)
+            FPSManager.init();
+
+            // Resource hints (early network optimization)
+            await Promise.all([
+                DNSPrefetch.init(),
+                Preconnect.init(),
+                PreloadCritical.init()
+            ]);
+
+            // Content optimization
+            await Promise.all([
+                HardwareAccel.init(),
+                FontOptimizer.init(),
+                ReflowOptimizer.init()
+            ]);
+
+            // Dynamic content handling
+            ImageOptimizer.init();
+            LazyLoader.init();
+            ScriptDeferral.init();
+            ParallelPrefetch.init();
+
+            // UI
+            await DiagnosticsPanel.init();
+        },
+
+        /**
+         * Attempt graceful degradation on error
+         */
+        attemptGracefulDegradation() {
+            Logger.warn('Attempting graceful degradation...');
+            
+            if (document.readyState === 'loading') {
+                window.addEventListener('load', () => {
+                    SafeScheduler.idle(() => {
+                        this.init().catch(e => {
+                            Logger.error('Graceful degradation failed', e);
+                        });
+                    });
+                }, { once: true });
+            }
+        },
+
+        /**
+         * Cleanup and shutdown
+         */
+        cleanup() {
+            Logger.info('Cleaning up...');
+            
+            ObserverManager.disconnectAll();
+            ImageOptimizer.cleanup();
+            LazyLoader.cleanup();
+            Telemetry.cleanup();
+            DiagnosticsPanel.remove();
+            FPSManager.restore();
+            
+            this.initialized = false;
+        }
+    };
+
+    // Auto-initialize
+    WebPerf.init().catch(e => {
+        Logger.error('Auto-initialization failed', e);
+    });
+
+    // Expose public API for debugging
+    window.WebPerf = {
+        version: '6.0',
+        config: ConfigManager,
+        cache: CacheManager,
+        telemetry: Telemetry,
+        cleanup: () => WebPerf.cleanup()
+    };
 })();
