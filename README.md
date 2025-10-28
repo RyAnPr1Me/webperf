@@ -4,7 +4,18 @@ A powerful userscript designed to dramatically improve web page loading performa
 
 ## 🚀 Features
 
-### Advanced Speed Optimizations (NEW in v5.5)
+### 🆕 Enhanced in v6.0 - Stability & Intelligence Update
+
+- **Per-Domain Configuration**: Whitelist/blacklist specific domains with custom settings
+- **Smart Cache with TTL**: LRU eviction with time-to-live expiration and memory pressure monitoring
+- **Lightweight Telemetry**: PerformanceObserver-based metrics with minimal CPU overhead
+- **Observer Limiting**: Configurable maximum concurrent MutationObservers to prevent overhead
+- **Modular Architecture**: Clean namespace separation with comprehensive JSDoc documentation
+- **Modern Async APIs**: Full use of async/await, requestIdleCallback, and PerformanceObserver
+- **Enhanced Safety**: Defensive programming with try-catch boundaries and graceful degradation
+- **Reduced Overhead**: Debounced observers, throttled operations, and efficient DOM helpers
+
+### Advanced Speed Optimizations
 
 - **Preconnect**: Establishes early connections to external domains, reducing connection latency
 - **Critical Resource Preloading**: Preloads critical CSS and visible images for faster initial render
@@ -16,21 +27,21 @@ A powerful userscript designed to dramatically improve web page loading performa
 
 - **Hardware Acceleration**: Forces GPU acceleration for smoother rendering and animations
 - **DNS Prefetching**: Preemptively resolves DNS for common domains and external resources
-- **Smart Caching**: In-memory caching system with LRU eviction (configurable up to 120MB)
+- **Smart Caching**: In-memory caching system with LRU eviction and TTL (configurable up to 120MB)
 - **Adaptive FPS**: Dynamically adjusts frame rate (60 FPS active, 12 FPS background) to conserve resources
 - **Image Optimization**: Automatically rewrites images to WebP format for faster loading
-- **Lazy Loading**: Defers loading of media elements until they're in viewport
+- **Lazy Loading**: Defers loading of media elements until they're in viewport using IntersectionObserver
 - **Parallel Prefetching**: Preloads same-origin links in parallel for instant navigation
-- **Script/Style Interception**: Optimizes script blocking and stylesheet loading
-- **Web Worker Analysis**: Offloads DOM analysis to background threads
 
 ### Live Diagnostics
 
 Real-time performance monitoring panel showing:
 - Current FPS target
-- Cache hit/miss ratios
+- Cache hit/miss ratios with MB usage
 - Number of images rewritten
-- Memory cache usage
+- Deferred scripts count
+- Active observers
+- Session uptime
 
 ## 📦 Installation
 
@@ -76,28 +87,37 @@ All features can be toggled on/off through your userscript manager's menu. Click
 ```javascript
 config: {
     // Core features
-    imageRewriter: true,        // Convert images to WebP format
-    smartCache: true,            // Enable in-memory caching
+    imageRewriter: true,         // Convert images to WebP format
+    smartCache: true,            // Enable in-memory caching with LRU + TTL
     adaptiveFPS: true,           // Dynamic FPS adjustment
     parallelPrefetch: true,      // Prefetch same-origin links
-    workerAnalyzer: true,        // Web Worker DOM analysis
     diagnosticsPanel: true,      // Show live performance stats
     lazyLoadMedia: true,         // Lazy load images/videos
     hardwareAccel: true,         // Force GPU acceleration
     dnsPrefetch: true,           // Enable DNS prefetching
+    telemetry: true,             // NEW v6.0: Lightweight performance metrics
     
-    // Advanced speed optimizations (NEW in v5.5)
+    // Advanced speed optimizations
     preconnect: true,            // Early connection to external domains
     preloadCritical: true,       // Preload critical resources
     fontOptimization: true,      // Optimize font loading
     aggressiveDefer: true,       // Defer non-critical scripts
     reduceReflows: true,         // Minimize layout thrashing
     
-    // Advanced settings (edit in script)
+    // Safety settings (NEW v6.0)
+    safeMode: false,             // Disable aggressive optimizations
+    maxObservers: 3,             // Limit concurrent MutationObservers
+    
+    // Domain settings (NEW v6.0)
+    whitelist: [],               // Always enable on these domains
+    blacklist: [],               // Always disable on these domains
+    
+    // Advanced settings (edit in script or via GM storage)
     preferFormat: 'webp',        // Preferred image format
     backgroundFps: 12,           // FPS when tab is inactive
     activeFps: 60,               // FPS when tab is active
     cacheSizeLimitMB: 120,       // Maximum cache size
+    cacheMaxAge: 3600000,        // NEW v6.0: Cache TTL (1 hour)
     parallelPrefetchCount: 6,    // Number of links to prefetch
     maxConcurrentFetches: 6      // Max parallel fetches
 }
@@ -105,7 +125,40 @@ config: {
 
 ## 🔧 How It Works
 
-### Advanced Speed Optimizations (NEW)
+### v6.0 Architecture Improvements
+
+**Modular Namespace Design**
+- Organized into clean, well-documented modules (ConfigManager, CacheManager, Telemetry, etc.)
+- Comprehensive JSDoc comments for every function and module
+- Clear separation of concerns for maintainability
+
+**Configuration System**
+- Centralized ConfigManager with GM storage persistence
+- Per-domain configuration overrides
+- Whitelist/blacklist support for domain-specific behavior
+- Runtime configuration updates with automatic persistence
+
+**Smart Caching with Intelligence**
+- LRU (Least Recently Used) eviction strategy
+- Time-to-live (TTL) expiration for stale entries
+- Memory pressure monitoring (Chrome only)
+- Automatic cache pruning when memory usage > 80%
+- Detailed cache statistics and hit/miss ratios
+
+**Performance Telemetry**
+- Uses PerformanceObserver API for efficient metrics collection
+- Tracks cache performance, image rewrites, script deferrals, and observer count
+- Minimal CPU overhead using idle callbacks
+- Session uptime and real-time diagnostics
+
+**Safety & Stability**
+- Observer limiting to prevent performance degradation
+- Defensive programming with try-catch boundaries
+- Graceful degradation on initialization failures
+- Debounced and throttled operations
+- Safe DOM element waiting with timeouts
+
+### Advanced Speed Optimizations
 
 **Preconnect**
 - Analyzes page resources and establishes early connections to external domains
@@ -144,14 +197,16 @@ Injects `<link rel="dns-prefetch">` tags for:
 - External domains referenced on the page
 - Font services, analytics, and social media platforms
 
-**Smart Caching**
+**Smart Caching (Enhanced v6.0)**
 - Stores fetched resources as Blob URLs in memory
 - Uses LRU (Least Recently Used) eviction strategy
+- TTL-based expiration (1 hour default)
+- Memory pressure monitoring and adaptive cache pruning
 - Automatically prunes cache when size limit is exceeded
-- Tracks hit/miss ratios for diagnostics
+- Tracks hit/miss ratios and eviction metrics for diagnostics
 
 **Image Optimization**
-- Intercepts image loads using MutationObserver
+- Intercepts image loads using debounced MutationObserver
 - Rewrites URLs to request WebP format
 - Falls back to original format if WebP unavailable
 - Serves from cache when possible
@@ -191,14 +246,16 @@ Expected improvements on typical websites with v5.5:
 
 ### Website looks broken?
 - Some sites may conflict with hardware acceleration
-- **Quick fix**: Click the userscript manager icon → "Disable hardwareAccel"
+- **v6.0 Fix**: Use the new domain blacklist feature via menu: "⚙️ Disable on this domain"
+- **Quick fix**: Click the userscript manager icon → Toggle features individually
 - Try disabling `hardwareAccel` or `imageRewriter` individually
 - You can exclude specific sites in Tampermonkey's settings
 
 ### Performance worse instead of better?
 - Very lightweight sites may see overhead from the script
+- **v6.0 Feature**: Use "⚙️ Disable on this domain" to blacklist permanently
 - **Tampermonkey tip**: Right-click the icon → "Disable on this site"
-- Consider disabling on specific domains through your userscript manager
+- Adjust `maxObservers` if you see high CPU usage
 - Adjust cache size if memory is constrained
 
 ### Menu commands not showing?
@@ -206,12 +263,19 @@ Expected improvements on typical websites with v5.5:
 - The script will still work with default settings
 - All features are enabled by default
 
+### High memory usage?
+- **v6.0 Feature**: Automatic memory pressure monitoring
+- Cache automatically prunes when system memory > 80%
+- Reduce `cacheSizeLimitMB` in configuration
+- TTL ensures stale entries are removed after 1 hour
+
 ## 🔐 Privacy & Security
 
 - **No data collection**: Everything runs locally in your browser
 - **No external requests**: Only prefetches resources from pages you visit
-- **No tracking**: No analytics or telemetry
+- **Minimal telemetry**: Performance metrics collected locally (can be disabled)
 - **Open source**: Inspect the code yourself
+- **Per-domain control**: Blacklist/whitelist for fine-grained control
 
 ## 🤝 Contributing
 
@@ -238,7 +302,21 @@ This project is open source and available under the MIT License.
 
 ## 🔄 Version History
 
-### v5.5 (Current) - "Speed Demon Update"
+### v6.0 (Current) - "Stability & Intelligence Update"
+- 🏗️ **Complete Refactor**: Modular namespace architecture with clean separation of concerns
+- 📚 **Full JSDoc Documentation**: Comprehensive inline documentation for every module and function
+- ⚙️ **Per-Domain Configuration**: Whitelist/blacklist support with domain-specific settings
+- 💾 **GM Storage Integration**: Persistent configuration with automatic saving/loading
+- 🧠 **Smart Cache v2**: LRU + TTL eviction, memory pressure monitoring, detailed statistics
+- 📊 **Lightweight Telemetry**: PerformanceObserver-based metrics with minimal CPU overhead
+- 🛡️ **Enhanced Safety**: Observer limiting, debounced operations, graceful degradation
+- ⚡ **Modern APIs**: Full async/await, requestIdleCallback, PerformanceObserver usage
+- 🎯 **Reduced Overhead**: Configurable observer limits, throttled DOM operations
+- 🔧 **Menu Enhancements**: Domain blacklist, cache clearing, improved feature toggles
+- 🚀 **Performance**: Removed Web Worker Analyzer (stability), optimized all modules
+- 📈 **Diagnostics v2**: Enhanced panel with uptime, observer count, deferred scripts
+
+### v5.5 - "Speed Demon Update"
 - 🚀 **Major Speed Enhancements**: 30-60% faster page loads (up from 20-40%)
 - ✨ **Preconnect optimization**: Early connections to external domains
 - ⚡ **Critical resource preloading**: Preload CSS and visible images
