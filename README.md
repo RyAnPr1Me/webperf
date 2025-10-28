@@ -30,20 +30,34 @@ Real-time performance monitoring panel showing:
 
 You need a userscript manager installed in your browser:
 
-- [Tampermonkey](https://www.tampermonkey.net/) (Chrome, Firefox, Safari, Edge, Opera)
+- **[Tampermonkey](https://www.tampermonkey.net/)** (Recommended - Chrome, Firefox, Safari, Edge, Opera)
 - [Greasemonkey](https://www.greasespot.net/) (Firefox)
 - [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Firefox, Opera, Edge)
 
+**Note:** This script is fully compatible with Tampermonkey and has been optimized for it.
+
 ### Install Steps
 
-1. Install one of the userscript managers above
-2. Click on the userscript manager icon in your browser
-3. Select "Create a new script" or "Add new script"
-4. Copy the entire contents of `webperf.js` from this repository
-5. Paste it into the editor
-6. Save the script (Ctrl+S or Cmd+S)
+#### For Tampermonkey (Recommended):
 
-The script will now run automatically on all websites!
+1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser
+2. Click on the Tampermonkey icon in your browser toolbar
+3. Select "Create a new script"
+4. Delete the default template
+5. Copy the entire contents of `webperf.js` from this repository
+6. Paste it into the editor
+7. Click File → Save (or Ctrl+S / Cmd+S)
+8. The script will now run automatically on all websites!
+
+#### For other userscript managers:
+
+1. Install your preferred userscript manager from the list above
+2. Click on the manager icon in your browser
+3. Select "Create a new script" or "Add new script"
+4. Copy and paste the entire contents of `webperf.js`
+5. Save the script
+
+The script will activate immediately and start optimizing page loads!
 
 ## 🎛️ Configuration
 
@@ -114,20 +128,35 @@ Expected improvements on typical websites:
 
 ## 🐛 Troubleshooting
 
-### Script not working?
+### Script not working in Tampermonkey?
+- **Check installation**: Open Tampermonkey dashboard and verify the script is listed and enabled
+- **Check permissions**: Ensure the script has "Always allow" or appropriate domain permissions
+- **Reload the page**: After installation or enabling, refresh the page (Ctrl+R or Cmd+R)
+- **Check console**: Press F12 and look for green "[WebPerf]" messages in the console
+- **Try manual trigger**: If initialization fails, reload the page once more
+
+### Script not working in other managers?
 - Ensure your userscript manager is enabled
 - Check that the script is enabled in the manager
 - Reload the page after installation
+- Some features may require specific GM grants - Tampermonkey is recommended
 
 ### Website looks broken?
 - Some sites may conflict with hardware acceleration
-- Disable individual features through the menu
-- Try disabling `hardwareAccel` or `imageRewriter`
+- **Quick fix**: Click the userscript manager icon → "Disable hardwareAccel"
+- Try disabling `hardwareAccel` or `imageRewriter` individually
+- You can exclude specific sites in Tampermonkey's settings
 
 ### Performance worse instead of better?
 - Very lightweight sites may see overhead from the script
+- **Tampermonkey tip**: Right-click the icon → "Disable on this site"
 - Consider disabling on specific domains through your userscript manager
 - Adjust cache size if memory is constrained
+
+### Menu commands not showing?
+- This is normal for some userscript managers (not a Tampermonkey issue)
+- The script will still work with default settings
+- All features are enabled by default
 
 ## 🔐 Privacy & Security
 
@@ -146,19 +175,30 @@ This project is open source and available under the MIT License.
 
 ## ⚡ Performance Tips
 
-1. **Enable all features** for maximum performance gain
-2. **Adjust cache size** based on your available RAM
-3. **Monitor diagnostics** to see what's being optimized
-4. **Disable on lightweight sites** where overhead isn't worth it
-5. **Use with ad blockers** for best results
+### For Tampermonkey Users:
+1. **Enable all features** in the Tampermonkey menu for maximum performance gain
+2. **Use Chrome/Edge** for best performance with hardware acceleration
+3. **Monitor diagnostics panel** (enabled by default) to see live optimization stats
+4. **Exclude lightweight sites**: Right-click Tampermonkey icon → settings → exclude specific domains
+5. **Combine with ad blockers** like uBlock Origin for best results
+
+### General Tips:
+1. **Adjust cache size** based on your available RAM (default: 120MB)
+2. **Check console logs** (F12) to see what's being optimized in real-time
+3. **Disable on lightweight sites** where overhead isn't worth it
+4. **Restart browser** after first install for optimal performance
 
 ## 🔄 Version History
 
 ### v5.4 (Current)
+- ✅ **Full Tampermonkey compatibility** with enhanced error handling
 - Added hardware acceleration support
 - Implemented DNS prefetching for common domains
 - Enhanced page load speed optimizations
-- Improved documentation
+- Improved documentation with Tampermonkey-specific instructions
+- Added graceful degradation for better stability
+- Added @compatible tags for all major browsers
+- Added proper document.body/head existence checks
 
 ### v5.3
 - Smart caching system

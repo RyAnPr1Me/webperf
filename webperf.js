@@ -7,7 +7,17 @@
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @run-at       document-start
+// @compatible   chrome Tampermonkey, Violentmonkey
+// @compatible   firefox Tampermonkey, Greasemonkey, Violentmonkey
+// @compatible   edge Tampermonkey, Violentmonkey
+// @compatible   safari Tampermonkey, Userscripts
+// @compatible   opera Tampermonkey, Violentmonkey
+// @license      MIT
+// @homepageURL  https://github.com/RyAnPr1ME/webperf
+// @supportURL   https://github.com/RyAnPr1ME/webperf/issues
 // ==/UserScript==
 
 (() => {
@@ -48,6 +58,15 @@
         },
 
         init() {
+            // Wait for document to be ready if needed
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => this.initFeatures());
+            } else {
+                this.initFeatures();
+            }
+        },
+
+        initFeatures() {
             this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
             this.registerMenu();
             this.toggleDiagnostics();
@@ -69,12 +88,22 @@
         },
 
         registerMenu() {
+            // Check if GM_registerMenuCommand is available (Tampermonkey compatibility)
+            if (typeof GM_registerMenuCommand !== 'function') {
+                this.log.warn('Menu commands not available in this userscript manager');
+                return;
+            }
+
             Object.keys(this.config).forEach(key => {
                 if (typeof this.config[key] === 'boolean') {
-                    const cmd = GM_registerMenuCommand(`${this.config[key] ? 'Disable' : 'Enable'} ${key}`, () => {
-                        this.toggleFeature(key);
-                    });
-                    this.menuCommands.push(cmd);
+                    try {
+                        const cmd = GM_registerMenuCommand(`${this.config[key] ? 'Disable' : 'Enable'} ${key}`, () => {
+                            this.toggleFeature(key);
+                        });
+                        this.menuCommands.push(cmd);
+                    } catch (e) {
+                        this.log.warn(`Failed to register menu command for ${key}: ${e.message}`);
+                    }
                 }
             });
         },
@@ -113,15 +142,23 @@
 
             document.querySelectorAll('img').forEach(optimize);
 
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (node.tagName === 'IMG') optimize(node);
-                        if (node.querySelectorAll) node.querySelectorAll('img').forEach(optimize);
-                    });
+            // Wait for body to exist before observing
+            const startObserver = () => {
+                if (!document.body) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (node.tagName === 'IMG') optimize(node);
+                            if (node.querySelectorAll) node.querySelectorAll('img').forEach(optimize);
+                        });
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -142,15 +179,23 @@
 
             document.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
 
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (!node.querySelectorAll) return;
-                        node.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
-                    });
+            // Wait for body to exist before observing
+            const startObserver = () => {
+                if (!document.body) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (!node.querySelectorAll) return;
+                            node.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
+                        });
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -221,21 +266,29 @@
          * SCRIPT/STYLE INTERCEPTION
          ****************************/
         interceptScripts() {
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (node.tagName === 'SCRIPT' && !node.type) {
-                            node.type = 'text/blocked-js';
-                            this.log.debug(`Blocked script: ${node.src || 'inline'}`);
-                        }
-                        if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
-                            node.media = 'print';
-                            node.onload = () => node.media = 'all';
-                        }
-                    });
+            // Wait for head to exist before observing
+            const startObserver = () => {
+                if (!document.head) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.head, { childList: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (node.tagName === 'SCRIPT' && !node.type) {
+                                node.type = 'text/blocked-js';
+                                this.log.debug(`Blocked script: ${node.src || 'inline'}`);
+                            }
+                            if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
+                                node.media = 'print';
+                                node.onload = () => node.media = 'all';
+                            }
+                        });
+                    }
+                });
+                observer.observe(document.head, { childList: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -421,7 +474,16 @@
                     padding: '6px 10px', fontSize: '12px', fontFamily: 'monospace',
                     borderRadius: '6px', zIndex: 999999, pointerEvents: 'auto'
                 });
-                document.body.appendChild(this.diagPanel);
+                
+                // Wait for body to exist before appending
+                const appendPanel = () => {
+                    if (!document.body) {
+                        setTimeout(appendPanel, 100);
+                        return;
+                    }
+                    document.body.appendChild(this.diagPanel);
+                };
+                appendPanel();
             }
         },
 
@@ -438,5 +500,20 @@
         }
     };
 
-    WebPerf.init();
+    // Initialize with error handling for Tampermonkey compatibility
+    try {
+        WebPerf.init();
+    } catch (e) {
+        console.error('[WebPerf] Initialization failed:', e);
+        // Attempt graceful degradation - try initializing after page load
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', () => {
+                try {
+                    WebPerf.init();
+                } catch (err) {
+                    console.error('[WebPerf] Second initialization attempt failed:', err);
+                }
+            });
+        }
+    }
 })();
