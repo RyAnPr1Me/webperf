@@ -291,6 +291,29 @@
         /****************************
          * HARDWARE ACCELERATION
          ****************************/
+        appendToHead(element, timeoutMs = 5000) {
+            if (document.head) {
+                document.head.appendChild(element);
+                return;
+            }
+            
+            // Wait for document.head with timeout
+            let timeoutId;
+            const observer = new MutationObserver(() => {
+                if (document.head) {
+                    clearTimeout(timeoutId);
+                    document.head.appendChild(element);
+                    observer.disconnect();
+                }
+            });
+            
+            observer.observe(document.documentElement, { childList: true });
+            timeoutId = setTimeout(() => {
+                observer.disconnect();
+                this.log.warn('Timeout waiting for document.head');
+            }, timeoutMs);
+        },
+
         enableHardwareAcceleration() {
             if (!this.config.hardwareAccel) {
                 // Remove the style tag if it exists
@@ -299,45 +322,28 @@
                 return;
             }
 
-            // Create and inject CSS to force hardware acceleration
+            // Create and inject CSS to force hardware acceleration on key elements
             const style = document.createElement('style');
             style.id = 'webperf-hw-accel';
             style.textContent = `
-                * {
-                    transform: translateZ(0);
-                    -webkit-transform: translateZ(0);
-                    -moz-transform: translateZ(0);
-                    -ms-transform: translateZ(0);
-                    -o-transform: translateZ(0);
-                    backface-visibility: hidden;
-                    -webkit-backface-visibility: hidden;
-                    -moz-backface-visibility: hidden;
-                    -ms-backface-visibility: hidden;
-                    perspective: 1000;
-                    -webkit-perspective: 1000;
-                    -moz-perspective: 1000;
-                    -ms-perspective: 1000;
-                }
-                
-                img, video, canvas {
+                img, video, canvas, iframe {
                     transform: translate3d(0, 0, 0);
                     -webkit-transform: translate3d(0, 0, 0);
+                    backface-visibility: hidden;
+                    -webkit-backface-visibility: hidden;
+                }
+                
+                [class*="animate"], [class*="transition"], [style*="transform"], [style*="animation"] {
+                    transform: translateZ(0);
+                    -webkit-transform: translateZ(0);
+                    backface-visibility: hidden;
+                    -webkit-backface-visibility: hidden;
+                    perspective: 1000px;
+                    -webkit-perspective: 1000px;
                 }
             `;
             
-            // Append to head when available
-            if (document.head) {
-                document.head.appendChild(style);
-            } else {
-                const observer = new MutationObserver(() => {
-                    if (document.head) {
-                        document.head.appendChild(style);
-                        observer.disconnect();
-                    }
-                });
-                observer.observe(document.documentElement, { childList: true });
-            }
-
+            this.appendToHead(style);
             this.log.info('Hardware acceleration enabled');
         },
 
@@ -378,7 +384,9 @@
                     if (url.hostname !== location.hostname) {
                         pageDomains.add(url.hostname);
                     }
-                } catch (e) {}
+                } catch (e) {
+                    // Silently ignore invalid URLs - common with data: or javascript: URLs
+                }
             });
 
             // Combine common domains with page-specific domains
@@ -389,18 +397,7 @@
                 const link = document.createElement('link');
                 link.rel = 'dns-prefetch';
                 link.href = `//${domain}`;
-                
-                if (document.head) {
-                    document.head.appendChild(link);
-                } else {
-                    const observer = new MutationObserver(() => {
-                        if (document.head) {
-                            document.head.appendChild(link);
-                            observer.disconnect();
-                        }
-                    });
-                    observer.observe(document.documentElement, { childList: true });
-                }
+                this.appendToHead(link);
             });
 
             this.log.info(`DNS prefetch enabled for ${allDomains.length} domains`);
