@@ -1,13 +1,23 @@
 // ==UserScript==
-// @name         Web Performance Suite v5.3
+// @name         Web Performance Suite v5.5
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      5.3
-// @description  Ultra-fast page loads: preemptive image/script/style rewriting, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics.
+// @version      5.5
+// @description  Ultra-fast page loads: resource hints, preconnect, preload, font optimization, script deferral, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching.
 // @author       You
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @run-at       document-start
+// @compatible   chrome Tampermonkey, Violentmonkey
+// @compatible   firefox Tampermonkey, Greasemonkey, Violentmonkey
+// @compatible   edge Tampermonkey, Violentmonkey
+// @compatible   safari Tampermonkey, Userscripts
+// @compatible   opera Tampermonkey, Violentmonkey
+// @license      MIT
+// @homepageURL  https://github.com/RyAnPr1ME/webperf
+// @supportURL   https://github.com/RyAnPr1ME/webperf/issues
 // ==/UserScript==
 
 (() => {
@@ -22,6 +32,13 @@
             workerAnalyzer: true,
             diagnosticsPanel: true,
             lazyLoadMedia: true,
+            hardwareAccel: true,
+            dnsPrefetch: true,
+            preconnect: true,
+            preloadCritical: true,
+            fontOptimization: true,
+            aggressiveDefer: true,
+            reduceReflows: true,
             imageFormats: ['jpg', 'jpeg', 'png'],
             preferFormat: 'webp',
             backgroundFps: 12,
@@ -46,6 +63,15 @@
         },
 
         init() {
+            // Wait for document to be ready if needed
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => this.initFeatures());
+            } else {
+                this.initFeatures();
+            }
+        },
+
+        initFeatures() {
             this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
             this.registerMenu();
             this.toggleDiagnostics();
@@ -55,22 +81,39 @@
             this.initWorker();
             this.prefetchAssets();
             this.interceptScripts();
+            this.enableHardwareAcceleration();
+            this.enableDNSPrefetch();
+            this.enablePreconnect();
+            this.enablePreload();
+            this.optimizeFonts();
+            this.deferNonCriticalScripts();
+            this.reduceReflowsOptimization();
             setInterval(() => this.updateDiagnostics(), 1000);
 
             document.addEventListener('visibilitychange', () => {
                 this.fpsTarget = document.hidden ? this.config.backgroundFps : this.config.activeFps;
             });
 
-            this.log.info('Web Performance Suite v5.3 initialized ⚡');
+            this.log.info('Web Performance Suite v5.5 initialized ⚡');
         },
 
         registerMenu() {
+            // Check if GM_registerMenuCommand is available (Tampermonkey compatibility)
+            if (typeof GM_registerMenuCommand !== 'function') {
+                this.log.warn('Menu commands not available in this userscript manager');
+                return;
+            }
+
             Object.keys(this.config).forEach(key => {
                 if (typeof this.config[key] === 'boolean') {
-                    const cmd = GM_registerMenuCommand(`${this.config[key] ? 'Disable' : 'Enable'} ${key}`, () => {
-                        this.toggleFeature(key);
-                    });
-                    this.menuCommands.push(cmd);
+                    try {
+                        const cmd = GM_registerMenuCommand(`${this.config[key] ? 'Disable' : 'Enable'} ${key}`, () => {
+                            this.toggleFeature(key);
+                        });
+                        this.menuCommands.push(cmd);
+                    } catch (e) {
+                        this.log.warn(`Failed to register menu command for ${key}: ${e.message}`);
+                    }
                 }
             });
         },
@@ -83,6 +126,13 @@
                 case 'diagnosticsPanel': this.toggleDiagnostics(); break;
                 case 'imageRewriter': if (this.config.imageRewriter) this.observeImages(); break;
                 case 'lazyLoadMedia': if (this.config.lazyLoadMedia) this.observeLazyMedia(); break;
+                case 'hardwareAccel': this.enableHardwareAcceleration(); break;
+                case 'dnsPrefetch': this.enableDNSPrefetch(); break;
+                case 'preconnect': this.enablePreconnect(); break;
+                case 'preloadCritical': this.enablePreload(); break;
+                case 'fontOptimization': this.optimizeFonts(); break;
+                case 'aggressiveDefer': this.deferNonCriticalScripts(); break;
+                case 'reduceReflows': this.reduceReflowsOptimization(); break;
             }
         },
 
@@ -107,15 +157,23 @@
 
             document.querySelectorAll('img').forEach(optimize);
 
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (node.tagName === 'IMG') optimize(node);
-                        if (node.querySelectorAll) node.querySelectorAll('img').forEach(optimize);
-                    });
+            // Wait for body to exist before observing
+            const startObserver = () => {
+                if (!document.body) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (node.tagName === 'IMG') optimize(node);
+                            if (node.querySelectorAll) node.querySelectorAll('img').forEach(optimize);
+                        });
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -136,15 +194,23 @@
 
             document.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
 
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (!node.querySelectorAll) return;
-                        node.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
-                    });
+            // Wait for body to exist before observing
+            const startObserver = () => {
+                if (!document.body) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (!node.querySelectorAll) return;
+                            node.querySelectorAll('img[data-src], img[data-srcset], video[data-src]').forEach(el => io.observe(el));
+                        });
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -215,21 +281,29 @@
          * SCRIPT/STYLE INTERCEPTION
          ****************************/
         interceptScripts() {
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    m.addedNodes.forEach(node => {
-                        if (node.tagName === 'SCRIPT' && !node.type) {
-                            node.type = 'text/blocked-js';
-                            this.log.debug(`Blocked script: ${node.src || 'inline'}`);
-                        }
-                        if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
-                            node.media = 'print';
-                            node.onload = () => node.media = 'all';
-                        }
-                    });
+            // Wait for head to exist before observing
+            const startObserver = () => {
+                if (!document.head) {
+                    setTimeout(startObserver, 100);
+                    return;
                 }
-            });
-            observer.observe(document.head, { childList: true });
+                const observer = new MutationObserver(mutations => {
+                    for (const m of mutations) {
+                        m.addedNodes.forEach(node => {
+                            if (node.tagName === 'SCRIPT' && !node.type) {
+                                node.type = 'text/blocked-js';
+                                this.log.debug(`Blocked script: ${node.src || 'inline'}`);
+                            }
+                            if (node.tagName === 'LINK' && node.rel === 'stylesheet') {
+                                node.media = 'print';
+                                node.onload = () => node.media = 'all';
+                            }
+                        });
+                    }
+                });
+                observer.observe(document.head, { childList: true });
+            };
+            startObserver();
         },
 
         /****************************
@@ -283,6 +357,333 @@
         },
 
         /****************************
+         * HARDWARE ACCELERATION
+         ****************************/
+        appendToHead(element, timeoutMs = 5000) {
+            if (document.head) {
+                document.head.appendChild(element);
+                return;
+            }
+            
+            // Wait for document.head with timeout
+            let timeoutId;
+            const observer = new MutationObserver(() => {
+                if (document.head) {
+                    clearTimeout(timeoutId);
+                    document.head.appendChild(element);
+                    observer.disconnect();
+                }
+            });
+            
+            observer.observe(document.documentElement, { childList: true });
+            timeoutId = setTimeout(() => {
+                observer.disconnect();
+                this.log.warn('Timeout waiting for document.head');
+            }, timeoutMs);
+        },
+
+        enableHardwareAcceleration() {
+            if (!this.config.hardwareAccel) {
+                // Remove the style tag if it exists
+                const existing = document.getElementById('webperf-hw-accel');
+                if (existing) existing.remove();
+                return;
+            }
+
+            // Create and inject CSS to force hardware acceleration on key elements
+            const style = document.createElement('style');
+            style.id = 'webperf-hw-accel';
+            style.textContent = `
+                img, video, canvas, iframe {
+                    transform: translate3d(0, 0, 0);
+                    -webkit-transform: translate3d(0, 0, 0);
+                    backface-visibility: hidden;
+                    -webkit-backface-visibility: hidden;
+                }
+                
+                [class*="animate"], [class*="transition"], [style*="transform"], [style*="animation"] {
+                    transform: translateZ(0);
+                    -webkit-transform: translateZ(0);
+                    backface-visibility: hidden;
+                    -webkit-backface-visibility: hidden;
+                    perspective: 1000px;
+                    -webkit-perspective: 1000px;
+                }
+            `;
+            
+            this.appendToHead(style);
+            this.log.info('Hardware acceleration enabled');
+        },
+
+        /****************************
+         * DNS PREFETCHING
+         ****************************/
+        enableDNSPrefetch() {
+            if (!this.config.dnsPrefetch) return;
+
+            // Common domains to prefetch
+            const commonDomains = [
+                'www.google.com',
+                'www.gstatic.com',
+                'fonts.googleapis.com',
+                'fonts.gstatic.com',
+                'ajax.googleapis.com',
+                'cdn.jsdelivr.net',
+                'cdnjs.cloudflare.com',
+                'unpkg.com',
+                'code.jquery.com',
+                'maxcdn.bootstrapcdn.com',
+                'stackpath.bootstrapcdn.com',
+                'use.fontawesome.com',
+                'www.googletagmanager.com',
+                'www.google-analytics.com',
+                'connect.facebook.net',
+                'platform.twitter.com',
+                'www.youtube.com',
+                'i.ytimg.com',
+                's.ytimg.com'
+            ];
+
+            // Extract domains from links on the page
+            const pageDomains = new Set();
+            document.querySelectorAll('a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+                try {
+                    const url = new URL(el.href || el.src);
+                    if (url.hostname !== location.hostname) {
+                        pageDomains.add(url.hostname);
+                    }
+                } catch (e) {
+                    // Silently ignore invalid URLs - common with data: or javascript: URLs
+                }
+            });
+
+            // Combine common domains with page-specific domains
+            const allDomains = [...new Set([...commonDomains, ...Array.from(pageDomains)])];
+
+            // Create DNS prefetch links
+            allDomains.forEach(domain => {
+                const link = document.createElement('link');
+                link.rel = 'dns-prefetch';
+                link.href = `//${domain}`;
+                this.appendToHead(link);
+            });
+
+            this.log.info(`DNS prefetch enabled for ${allDomains.length} domains`);
+        },
+
+        /****************************
+         * PRECONNECT OPTIMIZATION
+         ****************************/
+        enablePreconnect() {
+            if (!this.config.preconnect) return;
+
+            // Extract unique external domains from the page
+            const externalDomains = new Set();
+            document.querySelectorAll('link[href^="http"], script[src^="http"], img[src^="http"]').forEach(el => {
+                try {
+                    const url = new URL(el.href || el.src);
+                    if (url.hostname !== location.hostname) {
+                        externalDomains.add(url.origin);
+                    }
+                } catch (e) {
+                    // Silently ignore invalid URLs
+                }
+            });
+
+            // Add preconnect for external domains to establish early connections
+            Array.from(externalDomains).slice(0, 10).forEach(origin => {
+                const link = document.createElement('link');
+                link.rel = 'preconnect';
+                link.href = origin;
+                link.crossOrigin = 'anonymous';
+                this.appendToHead(link);
+            });
+
+            this.log.info(`Preconnect enabled for ${Math.min(externalDomains.size, 10)} domains`);
+        },
+
+        /****************************
+         * PRELOAD CRITICAL RESOURCES
+         ****************************/
+        enablePreload() {
+            if (!this.config.preloadCritical) return;
+
+            // Preload critical CSS files
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link, index) => {
+                if (index < 3) { // Only first 3 stylesheets are considered critical
+                    const preloadLink = document.createElement('link');
+                    preloadLink.rel = 'preload';
+                    preloadLink.as = 'style';
+                    preloadLink.href = link.href;
+                    this.appendToHead(preloadLink);
+                }
+            });
+
+            // Preload visible images
+            const visibleImages = Array.from(document.querySelectorAll('img[src]'))
+                .filter(img => {
+                    const rect = img.getBoundingClientRect();
+                    return rect.top < window.innerHeight && rect.bottom > 0;
+                })
+                .slice(0, 5);
+
+            visibleImages.forEach(img => {
+                const preloadLink = document.createElement('link');
+                preloadLink.rel = 'preload';
+                preloadLink.as = 'image';
+                preloadLink.href = img.src;
+                this.appendToHead(preloadLink);
+            });
+
+            this.log.info('Critical resource preloading enabled');
+        },
+
+        /****************************
+         * FONT OPTIMIZATION
+         ****************************/
+        optimizeFonts() {
+            if (!this.config.fontOptimization) return;
+
+            // Add font-display: swap to all @font-face rules
+            const style = document.createElement('style');
+            style.id = 'webperf-font-opt';
+            style.textContent = `
+                @font-face {
+                    font-display: swap;
+                }
+            `;
+            this.appendToHead(style);
+
+            // Observe and optimize font link tags
+            const optimizeFontLink = (link) => {
+                if (link.href && link.href.includes('fonts')) {
+                    // Add font-display parameter for Google Fonts
+                    if (link.href.includes('fonts.googleapis.com')) {
+                        const url = new URL(link.href);
+                        if (!url.searchParams.has('display')) {
+                            url.searchParams.set('display', 'swap');
+                            link.href = url.href;
+                        }
+                    }
+                    // Preconnect to font origins
+                    const preconnect = document.createElement('link');
+                    preconnect.rel = 'preconnect';
+                    preconnect.href = new URL(link.href).origin;
+                    preconnect.crossOrigin = 'anonymous';
+                    this.appendToHead(preconnect);
+                }
+            };
+
+            document.querySelectorAll('link[rel="stylesheet"]').forEach(optimizeFontLink);
+
+            this.log.info('Font optimization enabled');
+        },
+
+        /****************************
+         * AGGRESSIVE SCRIPT DEFERRAL
+         ****************************/
+        deferNonCriticalScripts() {
+            if (!this.config.aggressiveDefer) return;
+
+            // Use requestIdleCallback for non-critical operations
+            const scheduleIdleTask = (task) => {
+                if ('requestIdleCallback' in window) {
+                    requestIdleCallback(task, { timeout: 2000 });
+                } else {
+                    setTimeout(task, 1);
+                }
+            };
+
+            // Defer third-party scripts
+            const deferScript = (script) => {
+                if (!script.src) return;
+                
+                // Check if it's a third-party script
+                try {
+                    const url = new URL(script.src);
+                    if (url.hostname !== location.hostname) {
+                        if (!script.hasAttribute('defer') && !script.hasAttribute('async')) {
+                            script.defer = true;
+                            this.log.debug(`Deferred: ${script.src}`);
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            // Defer analytics and tracking scripts specifically
+            scheduleIdleTask(() => {
+                document.querySelectorAll('script[src*="analytics"], script[src*="tracking"], script[src*="gtag"], script[src*="facebook"], script[src*="twitter"]').forEach(deferScript);
+            });
+
+            this.log.info('Aggressive script deferral enabled');
+        },
+
+        /****************************
+         * REDUCE REFLOWS
+         ****************************/
+        reduceReflowsOptimization() {
+            if (!this.config.reduceReflows) return;
+
+            // Batch DOM reads and writes using requestAnimationFrame
+            let readQueue = [];
+            let writeQueue = [];
+            let scheduled = false;
+
+            const flush = () => {
+                // Read phase
+                readQueue.forEach(task => task());
+                readQueue = [];
+                
+                // Write phase
+                writeQueue.forEach(task => task());
+                writeQueue = [];
+                
+                scheduled = false;
+            };
+
+            // Expose batching API
+            window.webPerfBatch = {
+                read: (task) => {
+                    readQueue.push(task);
+                    if (!scheduled) {
+                        scheduled = true;
+                        requestAnimationFrame(flush);
+                    }
+                },
+                write: (task) => {
+                    writeQueue.push(task);
+                    if (!scheduled) {
+                        scheduled = true;
+                        requestAnimationFrame(flush);
+                    }
+                }
+            };
+
+            // Optimize common reflow-causing operations
+            const style = document.createElement('style');
+            style.id = 'webperf-reflow-opt';
+            style.textContent = `
+                /* Reduce layout thrashing */
+                * {
+                    will-change: auto;
+                }
+                
+                /* Contain layout where possible */
+                img, video, iframe {
+                    contain: layout;
+                }
+                
+                /* Use content-visibility for off-screen content */
+                .webperf-lazy-section {
+                    content-visibility: auto;
+                }
+            `;
+            this.appendToHead(style);
+
+            this.log.info('Reflow reduction optimizations enabled');
+        },
+
+        /****************************
          * DIAGNOSTICS
          ****************************/
         toggleDiagnostics() {
@@ -300,14 +701,23 @@
                     padding: '6px 10px', fontSize: '12px', fontFamily: 'monospace',
                     borderRadius: '6px', zIndex: 999999, pointerEvents: 'auto'
                 });
-                document.body.appendChild(this.diagPanel);
+                
+                // Wait for body to exist before appending
+                const appendPanel = () => {
+                    if (!document.body) {
+                        setTimeout(appendPanel, 100);
+                        return;
+                    }
+                    document.body.appendChild(this.diagPanel);
+                };
+                appendPanel();
             }
         },
 
         updateDiagnostics() {
             if (!this.config.diagnosticsPanel || !this.diagPanel) return;
             this.diagPanel.innerHTML = `
-                <b>WebPerf v5.3</b><br>
+                <b>WebPerf v5.5</b><br>
                 FPS: ${this.fpsTarget}<br>
                 Cache Hits: ${this.diagnostics.cacheHits}<br>
                 Cache Misses: ${this.diagnostics.cacheMisses}<br>
@@ -317,5 +727,20 @@
         }
     };
 
-    WebPerf.init();
+    // Initialize with error handling for Tampermonkey compatibility
+    try {
+        WebPerf.init();
+    } catch (e) {
+        console.error('[WebPerf] Initialization failed:', e);
+        // Attempt graceful degradation - try initializing after page load
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', () => {
+                try {
+                    WebPerf.init();
+                } catch (err) {
+                    console.error('[WebPerf] Second initialization attempt failed:', err);
+                }
+            });
+        }
+    }
 })();
