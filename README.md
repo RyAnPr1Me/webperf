@@ -1,8 +1,23 @@
 # Web Performance Suite
 
-A powerful userscript designed to dramatically improve web page loading performance through intelligent optimization techniques.
+A comprehensive collection of Tampermonkey scripts designed to dramatically improve web performance, enhance streaming quality, and protect your privacy.
+
+## 📦 Scripts Included
+
+### 1. **Web Performance Suite (webperf.js)** - Universal Performance Optimizer
+A powerful userscript that improves web page loading performance through intelligent optimization techniques.
+
+### 2. **YouTube 4K HDR Quality Enhancer (youtube-4k-enhancer.js)** - Video Quality Optimizer
+Forces maximum quality settings on YouTube including 4K resolution, highest bitrate/FPS, HDR support, and hardware acceleration.
+
+### 3. **Anti-Fingerprinting Suite (anti-fingerprint.js)** - Privacy Protection
+Comprehensive browser fingerprinting protection against Canvas, WebGL, Audio, Font enumeration, and other tracking methods.
 
 ## 🚀 Features
+
+---
+
+## 🌐 Web Performance Suite (webperf.js)
 
 ### 🆕 Enhanced in v6.0 - Stability & Intelligence Update
 
@@ -53,11 +68,11 @@ You need a userscript manager installed in your browser:
 - [Greasemonkey](https://www.greasespot.net/) (Firefox)
 - [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Firefox, Opera, Edge)
 
-**Note:** This script is fully compatible with Tampermonkey and has been optimized for it.
+**Note:** All scripts are fully compatible with Tampermonkey and have been optimized for it.
 
 ### Install Steps
 
-#### For Tampermonkey (Recommended):
+#### Installing Web Performance Suite (webperf.js):
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) for your browser
 2. Click on the Tampermonkey icon in your browser toolbar
@@ -68,15 +83,33 @@ You need a userscript manager installed in your browser:
 7. Click File → Save (or Ctrl+S / Cmd+S)
 8. The script will now run automatically on all websites!
 
-#### For other userscript managers:
+#### Installing YouTube 4K Enhancer (youtube-4k-enhancer.js):
+
+1. Follow the same steps as above
+2. Create a new script in Tampermonkey
+3. Copy and paste the entire contents of `youtube-4k-enhancer.js`
+4. Save the script
+5. Navigate to YouTube and the quality will be automatically maximized!
+
+#### Installing Anti-Fingerprinting Suite (anti-fingerprint.js):
+
+1. Follow the same steps as above
+2. Create a new script in Tampermonkey  
+3. Copy and paste the entire contents of `anti-fingerprint.js`
+4. Save the script
+5. Your browser fingerprint is now protected on all websites!
+
+**Tip:** You can install all three scripts simultaneously for comprehensive optimization and protection!
+
+### For other userscript managers:
 
 1. Install your preferred userscript manager from the list above
 2. Click on the manager icon in your browser
 3. Select "Create a new script" or "Add new script"
-4. Copy and paste the entire contents of `webperf.js`
+4. Copy and paste the script contents
 5. Save the script
 
-The script will activate immediately and start optimizing page loads!
+The scripts will activate immediately!
 
 ## 🎛️ Configuration
 
@@ -284,6 +317,209 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 ## 📄 License
 
 This project is open source and available under the MIT License.
+
+---
+
+## 🎬 YouTube 4K HDR Quality Enhancer (youtube-4k-enhancer.js)
+
+### Features
+
+**Video Quality Optimization:**
+- 🎯 **4K Resolution**: Automatically selects 2160p (4K) or highest available resolution
+- 🎨 **HDR Support**: Enables HDR/HDR10+ when available on compatible displays
+- 🚀 **High FPS**: Prefers 60fps over 30fps for smoother playback
+- 📊 **Maximum Bitrate**: Selects premium bitrate streams for best quality
+
+**Hardware & DRM Optimization:**
+- ⚡ **Hardware Acceleration**: Forces GPU acceleration for smooth 4K playback
+- 🔐 **Widevine DRM Optimization**: Configures Widevine for highest quality streams
+- 🎵 **High Audio Quality**: Automatically selects highest bitrate audio tracks
+- 📦 **Large Buffer**: Optimizes buffer size for smooth 4K streaming
+
+**Codec Preferences:**
+- VP9 codec preferred over AVC for better quality at same bitrate
+- MediaCapabilities API enhanced to report 4K support
+- EME (Encrypted Media Extensions) optimized for quality over compatibility
+
+### Installation
+
+1. Install Tampermonkey in your browser
+2. Click "Create a new script"
+3. Copy the entire contents of `youtube-4k-enhancer.js`
+4. Paste into the editor and save
+5. Navigate to any YouTube video - quality will be automatically maximized!
+
+### Configuration
+
+Access settings via Tampermonkey menu:
+- Toggle Debug Mode (shows stats overlay)
+- Toggle HDR support
+- Toggle Hardware Acceleration
+- Toggle High FPS preference
+
+### Advanced Settings
+
+Edit the script to customize:
+```javascript
+preferredQuality: '2160p',      // 4K resolution (or '1440p', '1080p', etc.)
+preferHDR: true,                // Enable HDR when available
+preferHighFPS: true,            // Prefer 60fps
+codecPreference: 'vp9',         // VP9 or AVC
+audioQuality: 'high',           // High audio bitrate
+bufferSize: 'large'             // Larger buffer for smoother playback
+```
+
+### How It Works
+
+1. **Quality Controller**: Monitors YouTube player and applies quality settings automatically
+2. **Widevine Hooks**: Enhances MediaCapabilities and EME APIs to prefer high-quality configs
+3. **Hardware Acceleration**: Applies GPU-optimized CSS transforms to video elements
+4. **Smart Detection**: Finds and clicks quality menu options programmatically
+5. **Persistent Monitoring**: Reapplies settings when video changes or quality is reset
+
+### Troubleshooting
+
+**Quality not changing?**
+- Wait a few seconds after video starts - script reapplies settings periodically
+- Enable debug mode to see current quality in stats overlay
+- Check browser console (F12) for "[YT-4K]" messages
+
+**Video stuttering?**
+- Ensure hardware acceleration is enabled in browser settings
+- Try lowering quality to 1440p if your GPU can't handle 4K
+- Check your internet speed supports 4K streaming
+
+**HDR not working?**
+- Verify your display supports HDR
+- Enable HDR in Windows/Mac display settings
+- Use Chrome/Edge (better HDR support than Firefox)
+
+---
+
+## 🎭 Anti-Fingerprinting Suite (anti-fingerprint.js)
+
+### Features
+
+**Canvas Fingerprinting Protection:**
+- 🎨 Adds random noise to canvas operations
+- Protects `toDataURL()`, `getImageData()`, and `toBlob()` methods
+- Consistent noise within session for better privacy
+
+**WebGL Fingerprinting Protection:**
+- 🎮 Spoofs GPU renderer and vendor information
+- Blocks `WEBGL_debug_renderer_info` extension
+- Adds noise to `readPixels()` output
+- Reports generic "Intel Iris OpenGL Engine"
+
+**Audio Fingerprinting Protection:**
+- 🔊 Adds minimal noise to AudioContext buffers
+- Protects both AudioContext and OfflineAudioContext
+- Prevents audio signature extraction
+
+**Font Enumeration Protection:**
+- 🔤 Limits reported fonts to common system fonts
+- Blocks font enumeration attempts
+- Returns only standard Arial, Helvetica, Times, etc.
+
+**Screen Fingerprinting Protection:**
+- 📱 Spoofs screen resolution to common values (1920x1080, 1366x768, etc.)
+- Randomizes screen dimensions slightly
+- Normalizes color depth to 24-bit
+
+**User Agent Protection:**
+- 🌐 Spoofs user agent to common Chrome on Windows
+- Normalizes platform to Win32
+- Consistent vendor reporting (Google Inc.)
+
+**WebRTC Leak Protection:**
+- 🔒 Blocks WebRTC from leaking real IP address
+- Disables getUserMedia for camera/mic access
+- Removes ICE servers from RTCPeerConnection
+
+**Additional Protections:**
+- 🔋 **Battery API**: Spoofs battery status (always 100%, charging)
+- 💻 **Hardware Info**: Randomizes CPU cores (2-8) and memory (2-16GB)
+- 🌍 **Timezone**: Spoofs timezone to UTC
+- 🗣️ **Languages**: Reports only en-US
+- 🔌 **Plugins**: Hides all browser plugins
+
+### Installation
+
+1. Install Tampermonkey in your browser
+2. Click "Create a new script"
+3. Copy the entire contents of `anti-fingerprint.js`
+4. Paste into the editor and save
+5. The script will run automatically on all websites!
+
+### Configuration
+
+Access settings via Tampermonkey menu:
+- Toggle individual protections (Canvas, WebGL, Audio, etc.)
+- Toggle Noise Randomization
+- Toggle Debug Mode (shows active protections)
+
+### How It Works
+
+**Noise-Based Protection:**
+- Adds imperceptible random noise to fingerprinting APIs
+- Noise is consistent within a session but changes between sessions
+- Makes fingerprints unique but unstable over time
+
+**Spoofing Strategy:**
+- Reports common/generic values instead of actual hardware
+- Blends in with majority of users
+- Randomizes some values to prevent tracking
+
+**Early Injection:**
+- Runs at `document-start` before any page scripts
+- Protections applied before fingerprinting attempts
+- No fingerprinting bypass possible
+
+### Privacy Impact
+
+**Effectiveness:**
+- ✅ Blocks Canvas fingerprinting (very effective)
+- ✅ Blocks WebGL fingerprinting (very effective)
+- ✅ Blocks Audio fingerprinting (effective)
+- ✅ Prevents WebRTC IP leaks (complete)
+- ✅ Hides hardware information (effective)
+- ⚠️ Font fingerprinting (partially effective)
+- ⚠️ Browser fingerprinting still possible through other methods
+
+**Compatibility:**
+- Most websites work normally
+- Some sites may detect anti-fingerprinting
+- Canvas-heavy sites (games, editors) work fine
+- WebGL games and 3D may be slightly affected
+
+### Testing Your Protection
+
+Test your fingerprint protection at:
+- browserleaks.com/canvas
+- browserleaks.com/webgl
+- browserleaks.com/ip
+- amiunique.org
+- coveryourtracks.eff.org
+
+### Troubleshooting
+
+**Website broken?**
+- Try disabling individual protections to find the culprit
+- Canvas/WebGL protections rarely cause issues
+- WebRTC blocking may break video calls (can disable for specific sites)
+
+**Still being tracked?**
+- No single tool provides complete protection
+- Combine with privacy extensions (Privacy Badger, uBlock Origin)
+- Use private browsing mode
+- Consider Tor Browser for maximum privacy
+
+**Debug Mode:**
+- Enable to see which protections are active
+- Shows small overlay in top-right corner
+- Useful for verifying script is working
+
+---
 
 ## ⚡ Performance Tips
 
