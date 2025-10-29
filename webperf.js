@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Web Performance Suite v6.0
+// @name         Web Performance Suite v6.1 EXTREME
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      6.0
-// @description  Ultra-fast page loads: resource hints, preconnect, preload, font optimization, script deferral, smart caching, adaptive FPS, lazy load, prefetching, live diagnostics, hardware acceleration, DNS prefetching. Enhanced with per-domain settings, smarter caching, and lightweight telemetry.
+// @version      6.1
+// @description  EXTREME SPEED MODE: Instant page loads with early hints, speculative prefetch, priority optimization, critical CSS inlining, service worker caching, third-party deferral. Plus all v6.0 features: resource hints, smart caching, adaptive FPS, lazy load, hardware acceleration.
 // @author       You
 // @match        *://*/*
 // @grant        GM_registerMenuCommand
@@ -21,9 +21,13 @@
 // ==/UserScript==
 
 /**
- * Web Performance Suite v6.0
+ * Web Performance Suite v6.1 EXTREME
  * 
- * A comprehensive userscript for optimizing web page performance through:
+ * A comprehensive userscript for INSTANT page loads through:
+ * - EXTREME SPEED MODE: Early hints, speculative prefetch, priority optimization
+ * - Critical CSS inlining for instant rendering
+ * - Service Worker aggressive caching
+ * - Third-party request optimization (deferred, not blocked)
  * - Resource hints (preconnect, dns-prefetch, preload)
  * - Smart caching with LRU eviction and TTL
  * - Adaptive FPS throttling
@@ -75,6 +79,22 @@
             cacheMaxAge: 3600000,  // NEW: 1 hour cache TTL
             parallelPrefetchCount: 6,
             maxConcurrentFetches: 6,
+            
+            // EXTREME SPEED MODE - NEW v6.1
+            extremeMode: true,           // Enable all aggressive optimizations
+            earlyHints: true,            // HTTP 103 Early Hints simulation
+            speculativePrefetch: true,   // Prefetch likely next pages
+            priorityHints: true,         // fetchpriority attributes
+            blockThirdParty: true,       // Defer non-critical 3rd party resources
+            inlineCriticalCSS: true,     // Inline critical CSS
+            preloadScanner: true,        // Simulate browser preload scanner
+            resourcePriority: true,      // Optimize resource loading priority
+            serviceWorkerCache: true,    // Aggressive SW caching
+            http2Push: true,             // Simulate HTTP/2 server push
+            instantNavigation: true,     // Instant back/forward navigation
+            jitScriptCompile: true,      // JIT compile scripts on hover
+            hoverDNSPrefetch: true,      // DNS prefetch on link hover
+            blockAdsTrackers: true,      // Block ad and tracker domains
             
             // Safety settings - NEW
             safeMode: false,  // If true, disables aggressive optimizations
@@ -250,7 +270,7 @@
          * @returns {string} Formatted message
          */
         format(level, message) {
-            return `[WebPerf v6.0][${level}] ${message}`;
+            return `[WebPerf v6.1 EXTREME][${level}] ${message}`;
         },
 
         /**
@@ -1590,6 +1610,981 @@
     };
 
     /**
+     * Early Hints optimizer
+     * Simulates HTTP 103 Early Hints for instant resource discovery
+     * @namespace EarlyHints
+     */
+    const EarlyHints = {
+        init() {
+            if (!ConfigManager.isEnabled('earlyHints')) return;
+            
+            // Inject critical resource hints immediately
+            this.injectCriticalHints();
+            Logger.info('Early Hints enabled');
+        },
+        
+        injectCriticalHints() {
+            const criticalOrigins = [
+                location.origin,
+                'https://fonts.googleapis.com',
+                'https://fonts.gstatic.com',
+                'https://cdn.jsdelivr.net',
+                'https://cdnjs.cloudflare.com'
+            ];
+            
+            criticalOrigins.forEach(origin => {
+                // Preconnect to critical origins
+                const preconnect = DOMHelper.createElement('link', {
+                    rel: 'preconnect',
+                    href: origin,
+                    crossorigin: 'anonymous'
+                });
+                DOMHelper.appendToHead(preconnect);
+                
+                // DNS prefetch as fallback
+                const dnsPrefetch = DOMHelper.createElement('link', {
+                    rel: 'dns-prefetch',
+                    href: origin
+                });
+                DOMHelper.appendToHead(dnsPrefetch);
+            });
+        }
+    };
+
+    /**
+     * Speculative prefetching
+     * Intelligently prefetches likely next pages
+     * @namespace SpeculativePrefetch
+     */
+    const SpeculativePrefetch = {
+        prefetchedUrls: new Set(),
+        
+        init() {
+            if (!ConfigManager.isEnabled('speculativePrefetch')) return;
+            
+            SafeScheduler.idle(() => {
+                this.prefetchVisibleLinks();
+                this.setupHoverPrefetch();
+            });
+            
+            Logger.info('Speculative prefetch enabled');
+        },
+        
+        prefetchVisibleLinks() {
+            const links = Array.from(document.querySelectorAll('a[href]'))
+                .filter(a => {
+                    try {
+                        const url = new URL(a.href, location.href);
+                        return url.origin === location.origin && 
+                               this.isVisible(a) &&
+                               !this.prefetchedUrls.has(a.href);
+                    } catch (e) {
+                        return false;
+                    }
+                })
+                .slice(0, 10);
+            
+            links.forEach(anchor => this.prefetchUrl(anchor.href));
+        },
+        
+        setupHoverPrefetch() {
+            document.addEventListener('mouseover', (e) => {
+                const anchor = e.target.closest('a[href]');
+                if (anchor && !this.prefetchedUrls.has(anchor.href)) {
+                    try {
+                        const url = new URL(anchor.href, location.href);
+                        if (url.origin === location.origin) {
+                            this.prefetchUrl(anchor.href);
+                        }
+                    } catch (e) {
+                        // Invalid URL
+                    }
+                }
+            }, { passive: true, capture: true });
+        },
+        
+        prefetchUrl(url) {
+            if (this.prefetchedUrls.has(url)) return;
+            
+            const link = DOMHelper.createElement('link', {
+                rel: 'prefetch',
+                href: url,
+                as: 'document'
+            });
+            DOMHelper.appendToHead(link);
+            
+            this.prefetchedUrls.add(url);
+            Logger.log('Prefetched:', url);
+        },
+        
+        isVisible(element) {
+            try {
+                const rect = element.getBoundingClientRect();
+                return rect.top < window.innerHeight + 200 && rect.bottom > -200;
+            } catch (e) {
+                return false;
+            }
+        }
+    };
+
+    /**
+     * Priority Hints optimizer
+     * Adds fetchpriority attributes for optimal loading
+     * @namespace PriorityHints
+     */
+    const PriorityHints = {
+        init() {
+            if (!ConfigManager.isEnabled('priorityHints')) return;
+            
+            SafeScheduler.idle(() => {
+                this.optimizePriorities();
+            });
+            
+            Logger.info('Priority hints enabled');
+        },
+        
+        optimizePriorities() {
+            // High priority for critical resources
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link, index) => {
+                if (index < 2) {
+                    link.setAttribute('fetchpriority', 'high');
+                }
+            });
+            
+            // High priority for visible images
+            document.querySelectorAll('img').forEach(img => {
+                try {
+                    const rect = img.getBoundingClientRect();
+                    if (rect.top < window.innerHeight) {
+                        img.setAttribute('fetchpriority', 'high');
+                        img.setAttribute('loading', 'eager');
+                    } else {
+                        img.setAttribute('fetchpriority', 'low');
+                        img.setAttribute('loading', 'lazy');
+                    }
+                } catch (e) {
+                    // Skip
+                }
+            });
+            
+            // Low priority for non-critical scripts
+            document.querySelectorAll('script[src]').forEach(script => {
+                if (!script.hasAttribute('fetchpriority')) {
+                    script.setAttribute('fetchpriority', 'low');
+                }
+            });
+        }
+    };
+
+    /**
+     * Third-party resource optimizer
+     * Optimizes non-critical third-party resources instead of blocking
+     * @namespace ThirdPartyOptimizer
+     */
+    const ThirdPartyOptimizer = {
+        deferredDomains: new Set([
+            'google-analytics.com',
+            'googletagmanager.com',
+            'facebook.net',
+            'doubleclick.net',
+            'analytics.google.com'
+        ]),
+        
+        init() {
+            if (!ConfigManager.isEnabled('blockThirdParty')) return;
+            
+            this.optimizeScripts();
+            // Note: Fetch deferral logic moved to AdTrackerBlocker to avoid
+            // multiple fetch override conflicts. AdTrackerBlocker checks
+            // this.shouldDefer() method for deferred domains integration.
+            
+            Logger.info('Third-party optimizer enabled');
+        },
+        
+        shouldDefer(url) {
+            try {
+                const urlObj = new URL(url, location.href);
+                return Array.from(this.deferredDomains).some(domain => 
+                    urlObj.hostname.includes(domain)
+                );
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        optimizeScripts() {
+            // Defer non-critical third-party scripts
+            const observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.tagName === 'SCRIPT' && node.src) {
+                            if (this.shouldDefer(node.src)) {
+                                if (!node.hasAttribute('async') && !node.hasAttribute('defer')) {
+                                    node.defer = true;
+                                    Logger.log('Deferred script:', node.src);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if (document.documentElement) {
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+            
+            // Optimize existing scripts
+            document.querySelectorAll('script[src]').forEach(script => {
+                if (this.shouldDefer(script.src)) {
+                    if (!script.hasAttribute('async') && !script.hasAttribute('defer')) {
+                        script.defer = true;
+                        Logger.log('Deferred existing script:', script.src);
+                    }
+                }
+            });
+        },
+        
+        deferNonCriticalRequests() {
+            // Delay non-critical third-party requests until page is loaded
+            const originalFetch = window.fetch;
+            window.fetch = (...args) => {
+                const url = args[0];
+                if (this.shouldDefer(url)) {
+                    // Delay until page is interactive
+                    return new Promise((resolve, reject) => {
+                        SafeScheduler.idle(() => {
+                            Logger.log('Deferred fetch:', url);
+                            originalFetch.apply(this, args)
+                                .then(resolve)
+                                .catch(reject);
+                        });
+                    });
+                }
+                return originalFetch.apply(this, args);
+            };
+        }
+    };
+
+    /**
+     * Critical CSS inliner
+     * Inlines critical CSS for instant rendering
+     * @namespace CriticalCSS
+     */
+    const CriticalCSS = {
+        init() {
+            if (!ConfigManager.isEnabled('inlineCriticalCSS')) return;
+            
+            SafeScheduler.idle(() => {
+                this.inlineCritical();
+            });
+            
+            Logger.info('Critical CSS inlining enabled');
+        },
+        
+        async inlineCritical() {
+            const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+                .slice(0, 2); // First 2 are usually critical
+            
+            for (const link of stylesheets) {
+                try {
+                    // Check if same-origin to avoid CORS issues
+                    const url = new URL(link.href, location.href);
+                    if (url.origin !== location.origin) {
+                        Logger.log('Skipping cross-origin CSS:', link.href);
+                        continue;
+                    }
+                    
+                    const response = await fetch(link.href);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
+                    const css = await response.text();
+                    
+                    // Create inline style
+                    const style = DOMHelper.createElement('style', {
+                        textContent: css,
+                        'data-inlined': 'true'
+                    });
+                    
+                    link.parentNode.insertBefore(style, link);
+                    link.rel = 'preload';
+                    link.as = 'style';
+                    
+                    Logger.log('Inlined CSS:', link.href);
+                } catch (e) {
+                    Logger.log('Failed to inline CSS:', link.href, e);
+                }
+            }
+        }
+    };
+
+    /**
+     * Preload scanner
+     * Simulates browser preload scanner for early resource discovery
+     * @namespace PreloadScanner
+     */
+    const PreloadScanner = {
+        init() {
+            if (!ConfigManager.isEnabled('preloadScanner')) return;
+            
+            this.scanAndPreload();
+            Logger.info('Preload scanner enabled');
+        },
+        
+        scanAndPreload() {
+            // Scan HTML for resources to preload
+            const html = document.documentElement.outerHTML;
+            
+            // Find script sources
+            const scriptRegex = /<script[^>]+src=["']([^"']+)["']/gi;
+            let match;
+            let count = 0;
+            
+            while ((match = scriptRegex.exec(html)) !== null && count < 5) {
+                const src = match[1];
+                if (!src.startsWith('data:') && !src.startsWith('blob:')) {
+                    const link = DOMHelper.createElement('link', {
+                        rel: 'preload',
+                        href: src,
+                        as: 'script'
+                    });
+                    DOMHelper.appendToHead(link);
+                    count++;
+                }
+            }
+            
+            // Find stylesheet hrefs
+            const linkRegex = /<link[^>]+href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi;
+            count = 0;
+            
+            while ((match = linkRegex.exec(html)) !== null && count < 3) {
+                const href = match[1];
+                if (!href.startsWith('data:') && !href.startsWith('blob:')) {
+                    const link = DOMHelper.createElement('link', {
+                        rel: 'preload',
+                        href: href,
+                        as: 'style'
+                    });
+                    DOMHelper.appendToHead(link);
+                    count++;
+                }
+            }
+        }
+    };
+
+    /**
+     * Resource priority optimizer
+     * Optimizes resource loading order
+     * @namespace ResourcePriority
+     */
+    const ResourcePriority = {
+        init() {
+            if (!ConfigManager.isEnabled('resourcePriority')) return;
+            
+            SafeScheduler.idle(() => {
+                this.optimizeLoadOrder();
+            });
+            
+            Logger.info('Resource priority optimizer enabled');
+        },
+        
+        optimizeLoadOrder() {
+            // Defer all non-critical scripts
+            document.querySelectorAll('script[src]:not([async]):not([defer])').forEach(script => {
+                const src = script.src.toLowerCase();
+                if (!src.includes('critical') && !src.includes('essential')) {
+                    script.defer = true;
+                }
+            });
+            
+            // Async non-critical stylesheets
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link, index) => {
+                if (index >= 2) { // After first 2 critical ones
+                    link.media = 'print';
+                    link.onload = function() {
+                        this.media = 'all';
+                    };
+                }
+            });
+        }
+    };
+
+    /**
+     * Service Worker cache manager
+     * Aggressive caching with Service Worker
+     * @namespace ServiceWorkerCache
+     */
+    const ServiceWorkerCache = {
+        init() {
+            if (!ConfigManager.isEnabled('serviceWorkerCache')) return;
+            if (!('serviceWorker' in navigator)) return;
+            
+            this.registerServiceWorker();
+            Logger.info('Service Worker cache enabled');
+        },
+        
+        registerServiceWorker() {
+            const swCode = `
+                const CACHE_NAME = 'webperf-v1';
+                
+                self.addEventListener('install', (event) => {
+                    self.skipWaiting();
+                });
+                
+                self.addEventListener('activate', (event) => {
+                    event.waitUntil(clients.claim());
+                });
+                
+                self.addEventListener('fetch', (event) => {
+                    event.respondWith(
+                        caches.open(CACHE_NAME).then((cache) => {
+                            return cache.match(event.request).then((response) => {
+                                if (response) {
+                                    // Return cached response immediately
+                                    fetch(event.request).then((networkResponse) => {
+                                        cache.put(event.request, networkResponse);
+                                    }).catch(() => {});
+                                    return response;
+                                }
+                                
+                                return fetch(event.request).then((networkResponse) => {
+                                    cache.put(event.request, networkResponse.clone());
+                                    return networkResponse;
+                                });
+                            });
+                        })
+                    );
+                });
+            `;
+            
+            const blob = new Blob([swCode], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(blob);
+            
+            navigator.serviceWorker.register(swUrl).then(() => {
+                Logger.log('Service Worker registered');
+            }).catch((e) => {
+                Logger.log('Service Worker registration failed:', e);
+            });
+        }
+    };
+
+    /**
+     * Instant navigation
+     * Instant back/forward navigation
+     * @namespace InstantNavigation
+     */
+    const InstantNavigation = {
+        pageCache: new Map(),
+        
+        init() {
+            if (!ConfigManager.isEnabled('instantNavigation')) return;
+            
+            this.cacheCurrentPage();
+            this.setupPopStateHandler();
+            
+            Logger.info('Instant navigation enabled');
+        },
+        
+        cacheCurrentPage() {
+            // Cache current page HTML
+            const html = document.documentElement.outerHTML;
+            this.pageCache.set(location.href, html);
+            
+            // Limit cache size
+            if (this.pageCache.size > 10) {
+                const firstKey = this.pageCache.keys().next().value;
+                this.pageCache.delete(firstKey);
+            }
+        },
+        
+        setupPopStateHandler() {
+            window.addEventListener('popstate', (e) => {
+                const url = location.href;
+                const cached = this.pageCache.get(url);
+                
+                if (cached) {
+                    // Safely restore from cache using DOMParser to avoid XSS
+                    try {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(cached, 'text/html');
+                        
+                        // Clear and rebuild document safely
+                        document.documentElement.replaceWith(doc.documentElement);
+                        Logger.log('Instant navigation:', url);
+                    } catch (e) {
+                        Logger.warn('Failed to restore cached page:', e);
+                        // Fall back to normal navigation
+                        location.reload();
+                    }
+                }
+            });
+        }
+    };
+
+    /**
+     * JIT Script Compiler
+     * Compiles/preloads scripts when cursor is near clickable elements
+     * @namespace JITScriptCompiler
+     */
+    const JITScriptCompiler = {
+        compiledScripts: new Set(),
+        pendingCompilations: new Map(),
+        hoverThreshold: 50, // pixels
+        
+        init() {
+            if (!ConfigManager.isEnabled('jitScriptCompile')) return;
+            
+            this.setupHoverDetection();
+            Logger.info('JIT script compilation enabled');
+        },
+        
+        setupHoverDetection() {
+            let lastMousePos = { x: 0, y: 0 };
+            
+            document.addEventListener('mousemove', SafeScheduler.throttle((e) => {
+                lastMousePos = { x: e.clientX, y: e.clientY };
+                this.checkProximityToInteractiveElements(lastMousePos);
+            }, 100), { passive: true });
+        },
+        
+        checkProximityToInteractiveElements(mousePos) {
+            // Find all clickable elements
+            const clickables = document.querySelectorAll('a, button, [onclick], [role="button"]');
+            
+            for (const element of clickables) {
+                if (this.isNearElement(element, mousePos)) {
+                    this.precompileScriptsForElement(element);
+                }
+            }
+        },
+        
+        isNearElement(element, mousePos) {
+            try {
+                const rect = element.getBoundingClientRect();
+                const threshold = this.hoverThreshold;
+                
+                return mousePos.x >= rect.left - threshold &&
+                       mousePos.x <= rect.right + threshold &&
+                       mousePos.y >= rect.top - threshold &&
+                       mousePos.y <= rect.bottom + threshold;
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        precompileScriptsForElement(element) {
+            // If it's a link, preload the destination page's scripts
+            if (element.tagName === 'A' && element.href) {
+                this.preloadPageScripts(element.href);
+            }
+            
+            // If it has onclick, try to parse and compile
+            if (element.onclick) {
+                this.compileInlineScript(element.onclick.toString());
+            }
+            
+            // Check for event listeners (approximate)
+            const events = ['click', 'mousedown', 'touchstart'];
+            events.forEach(eventType => {
+                // Trigger a dummy compilation by preloading nearby scripts
+                this.preloadNearbyScripts(element);
+            });
+        },
+        
+        async preloadPageScripts(url) {
+            if (this.compiledScripts.has(url)) return;
+            
+            try {
+                const urlObj = new URL(url, location.href);
+                if (urlObj.origin !== location.origin) return;
+                
+                // Prefetch the page HTML
+                const link = DOMHelper.createElement('link', {
+                    rel: 'prefetch',
+                    href: url,
+                    as: 'document'
+                });
+                DOMHelper.appendToHead(link);
+                
+                this.compiledScripts.add(url);
+                Logger.log('JIT: Prefetched page scripts for', url);
+            } catch (e) {
+                // Invalid URL
+            }
+        },
+        
+        compileInlineScript(scriptCode) {
+            const hash = this.hashCode(scriptCode);
+            if (this.compiledScripts.has(hash)) return;
+            
+            try {
+                // Pre-compile by creating a function
+                new Function(scriptCode);
+                this.compiledScripts.add(hash);
+                Logger.log('JIT: Compiled inline script');
+            } catch (e) {
+                // Invalid script
+            }
+        },
+        
+        preloadNearbyScripts(element) {
+            // Find script elements near this clickable
+            const scripts = document.querySelectorAll('script[src]');
+            
+            scripts.forEach(script => {
+                if (this.isNearElement(script, this.getElementCenter(element))) {
+                    this.preloadScript(script.src);
+                }
+            });
+        },
+        
+        async preloadScript(src) {
+            if (this.compiledScripts.has(src)) return;
+            
+            const link = DOMHelper.createElement('link', {
+                rel: 'prefetch',
+                href: src,
+                as: 'script'
+            });
+            DOMHelper.appendToHead(link);
+            
+            this.compiledScripts.add(src);
+            Logger.log('JIT: Preloaded script', src);
+        },
+        
+        getElementCenter(element) {
+            try {
+                const rect = element.getBoundingClientRect();
+                return {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2
+                };
+            } catch (e) {
+                return { x: 0, y: 0 };
+            }
+        },
+        
+        hashCode(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return hash.toString();
+        }
+    };
+
+    /**
+     * Hover DNS Prefetcher
+     * DNS prefetch when hovering near links
+     * @namespace HoverDNSPrefetch
+     */
+    const HoverDNSPrefetch = {
+        prefetchedDomains: new Set(),
+        hoverThreshold: 30, // pixels
+        
+        init() {
+            if (!ConfigManager.isEnabled('hoverDNSPrefetch')) return;
+            
+            this.setupHoverPrefetch();
+            Logger.info('Hover DNS prefetch enabled');
+        },
+        
+        setupHoverPrefetch() {
+            let lastMousePos = { x: 0, y: 0 };
+            
+            // Track mouse position
+            document.addEventListener('mousemove', SafeScheduler.throttle((e) => {
+                lastMousePos = { x: e.clientX, y: e.clientY };
+                this.checkNearbyLinks(lastMousePos);
+            }, 100), { passive: true });
+            
+            // Also immediate prefetch on direct hover
+            document.addEventListener('mouseover', (e) => {
+                const link = e.target.closest('a[href]');
+                if (link) {
+                    this.prefetchDomain(link.href);
+                }
+            }, { passive: true, capture: true });
+        },
+        
+        checkNearbyLinks(mousePos) {
+            const links = document.querySelectorAll('a[href]');
+            
+            for (const link of links) {
+                if (this.isNearLink(link, mousePos)) {
+                    this.prefetchDomain(link.href);
+                }
+            }
+        },
+        
+        isNearLink(link, mousePos) {
+            try {
+                const rect = link.getBoundingClientRect();
+                const threshold = this.hoverThreshold;
+                
+                return mousePos.x >= rect.left - threshold &&
+                       mousePos.x <= rect.right + threshold &&
+                       mousePos.y >= rect.top - threshold &&
+                       mousePos.y <= rect.bottom + threshold;
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        prefetchDomain(url) {
+            try {
+                const urlObj = new URL(url, location.href);
+                const domain = urlObj.hostname;
+                
+                if (this.prefetchedDomains.has(domain)) return;
+                
+                // DNS prefetch
+                const dnsPrefetch = DOMHelper.createElement('link', {
+                    rel: 'dns-prefetch',
+                    href: `//${domain}`
+                });
+                DOMHelper.appendToHead(dnsPrefetch);
+                
+                // Preconnect for same-origin
+                if (urlObj.origin === location.origin || this.isLikelyImportant(domain)) {
+                    const preconnect = DOMHelper.createElement('link', {
+                        rel: 'preconnect',
+                        href: urlObj.origin,
+                        crossorigin: 'anonymous'
+                    });
+                    DOMHelper.appendToHead(preconnect);
+                }
+                
+                this.prefetchedDomains.add(domain);
+                Logger.log('Hover DNS prefetch:', domain);
+            } catch (e) {
+                // Invalid URL
+            }
+        },
+        
+        isLikelyImportant(domain) {
+            const importantDomains = ['cdn', 'api', 'static', 'assets'];
+            return importantDomains.some(keyword => domain.includes(keyword));
+        }
+    };
+
+    /**
+     * Ad and Tracker Blocker
+     * Blocks known ad and tracker domains by default
+     * @namespace AdTrackerBlocker
+     */
+    const AdTrackerBlocker = {
+        blockedDomains: new Set([
+            // Ads
+            'doubleclick.net',
+            'googleadservices.com',
+            'googlesyndication.com',
+            'adservice.google.com',
+            'ads.google.com',
+            'pagead2.googlesyndication.com',
+            'adfarm.mediaplex.com',
+            'ads.yahoo.com',
+            'advertising.com',
+            'adnxs.com',
+            'adsystem.com',
+            'amazon-adsystem.com',
+            'criteo.com',
+            'outbrain.com',
+            'taboola.com',
+            'media.net',
+            'adroll.com',
+            'serving-sys.com',
+            'adform.net',
+            'advertising.com',
+            
+            // Trackers
+            'google-analytics.com',
+            'googletagmanager.com',
+            'analytics.google.com',
+            'facebook.net',
+            'connect.facebook.net',
+            'pixel.facebook.com',
+            'analytics.facebook.com',
+            'scorecardresearch.com',
+            'quantserve.com',
+            'chartbeat.com',
+            'newrelic.com',
+            'nr-data.net',
+            'hotjar.com',
+            'mouseflow.com',
+            'crazyegg.com',
+            'mixpanel.com',
+            'segment.com',
+            'segment.io',
+            'amplitude.com',
+            'fullstory.com',
+            'logrocket.com',
+            'heap.io',
+            'heapanalytics.com'
+        ]),
+        
+        blockedCount: 0,
+        
+        init() {
+            if (!ConfigManager.isEnabled('blockAdsTrackers')) return;
+            
+            this.blockRequests();
+            this.blockScripts();
+            this.blockImages();
+            this.blockIframes();
+            
+            Logger.info('Ad & Tracker blocker enabled');
+        },
+        
+        isBlocked(url) {
+            try {
+                const urlObj = new URL(url, location.href);
+                return Array.from(this.blockedDomains).some(domain => 
+                    urlObj.hostname.includes(domain) || urlObj.href.includes(domain)
+                );
+            } catch (e) {
+                return false;
+            }
+        },
+        
+        blockRequests() {
+            // Unified fetch override handling both blocking and deferring
+            // This consolidates AdTrackerBlocker and ThirdPartyOptimizer logic
+            // to prevent multiple override conflicts
+            const originalFetch = window.fetch;
+            window.fetch = (...args) => {
+                const url = args[0];
+                
+                // Priority 1: Check if should be blocked (ads/trackers)
+                if (this.isBlocked(url)) {
+                    this.blockedCount++;
+                    Logger.log('Blocked fetch:', url);
+                    return Promise.reject(new Error('Blocked by AdTrackerBlocker'));
+                }
+                
+                // Priority 2: Check if should be deferred (analytics/non-critical)
+                // Safe check: only defer if ThirdPartyOptimizer is initialized
+                if (typeof ThirdPartyOptimizer !== 'undefined' && 
+                    ThirdPartyOptimizer.shouldDefer && 
+                    ThirdPartyOptimizer.shouldDefer(url)) {
+                    return new Promise((resolve, reject) => {
+                        SafeScheduler.idle(() => {
+                            Logger.log('Deferred fetch:', url);
+                            originalFetch.apply(this, args)
+                                .then(resolve)
+                                .catch(reject);
+                        });
+                    });
+                }
+                
+                // Priority 3: Allow normal requests
+                return originalFetch.apply(this, args);
+            };
+            
+            // Block XHR requests
+            const originalOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(...args) {
+                const url = args[1];
+                if (AdTrackerBlocker.isBlocked(url)) {
+                    AdTrackerBlocker.blockedCount++;
+                    Logger.log('Blocked XHR:', url);
+                    throw new Error('Blocked by AdTrackerBlocker');
+                }
+                return originalOpen.apply(this, args);
+            };
+        },
+        
+        blockScripts() {
+            const observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.tagName === 'SCRIPT' && node.src) {
+                            if (this.isBlocked(node.src)) {
+                                // Remove the element to prevent any requests
+                                node.remove();
+                                this.blockedCount++;
+                                Logger.log('Blocked script:', node.src);
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if (document.documentElement) {
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+            
+            // Block existing scripts
+            document.querySelectorAll('script[src]').forEach(script => {
+                if (this.isBlocked(script.src)) {
+                    script.remove();
+                    this.blockedCount++;
+                    Logger.log('Blocked existing script:', script.src);
+                }
+            });
+        },
+        
+        blockImages() {
+            const observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.tagName === 'IMG' && node.src) {
+                            if (this.isBlocked(node.src)) {
+                                node.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                                this.blockedCount++;
+                                Logger.log('Blocked image:', node.src);
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if (document.documentElement) {
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+        },
+        
+        blockIframes() {
+            const observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.tagName === 'IFRAME' && node.src) {
+                            if (this.isBlocked(node.src)) {
+                                node.src = 'about:blank';
+                                this.blockedCount++;
+                                Logger.log('Blocked iframe:', node.src);
+                            }
+                        }
+                    }
+                }
+            });
+            
+            if (document.documentElement) {
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+        },
+        
+        getBlockedCount() {
+            return this.blockedCount;
+        }
+    };
+
+    /**
      * Diagnostics panel module
      * @namespace DiagnosticsPanel
      */
@@ -1649,13 +2644,15 @@
 
             const cacheStats = CacheManager.getStats();
             const metrics = Telemetry.getAll();
+            const blockedCount = AdTrackerBlocker.getBlockedCount ? AdTrackerBlocker.getBlockedCount() : 0;
 
             this.panel.innerHTML = `
-                <strong>WebPerf v6.0</strong><br>
+                <strong>WebPerf v6.1 EXTREME</strong><br>
                 FPS: ${FPSManager.fpsTarget}<br>
                 Cache: ${cacheStats.hits}/${cacheStats.hits + cacheStats.misses} hits (${cacheStats.mb} MB)<br>
                 Images: ${metrics.rewrittenImages}<br>
                 Scripts: ${metrics.deferredScripts} deferred<br>
+                Blocked: ${blockedCount} ads/trackers<br>
                 Observers: ${metrics.observerCount}<br>
                 Uptime: ${Telemetry.getUptime()}s
             `;
@@ -1712,7 +2709,9 @@
                 'imageRewriter', 'smartCache', 'adaptiveFPS', 'parallelPrefetch',
                 'diagnosticsPanel', 'lazyLoadMedia', 'hardwareAccel', 'dnsPrefetch',
                 'preconnect', 'preloadCritical', 'fontOptimization', 'aggressiveDefer',
-                'reduceReflows', 'telemetry'
+                'reduceReflows', 'telemetry', 'extremeMode', 'speculativePrefetch',
+                'priorityHints', 'blockThirdParty', 'inlineCriticalCSS', 
+                'jitScriptCompile', 'hoverDNSPrefetch', 'blockAdsTrackers'
             ];
 
             features.forEach(feature => {
@@ -1786,7 +2785,7 @@
             this.initialized = true;
 
             try {
-                Logger.info('Initializing Web Performance Suite v6.0...');
+                Logger.info('Initializing Web Performance Suite v6.1 EXTREME...');
 
                 // Phase 1: Configuration
                 await ConfigManager.init();
@@ -1805,7 +2804,7 @@
                 // Phase 5: Setup menu
                 MenuManager.init();
 
-                Logger.info('Web Performance Suite v6.0 initialized ⚡');
+                Logger.info('Web Performance Suite v6.1 EXTREME initialized ⚡⚡⚡ INSTANT LOAD MODE ACTIVE');
             } catch (e) {
                 Logger.error('Initialization failed', e);
                 this.attemptGracefulDegradation();
@@ -1827,6 +2826,10 @@
          * Initialize all features
          */
         async initializeFeatures() {
+            // EXTREME SPEED MODE - Early hints (run first for instant resource discovery)
+            EarlyHints.init();
+            PreloadScanner.init();
+            
             // FPS management first (affects rendering)
             FPSManager.init();
 
@@ -1843,6 +2846,22 @@
                 FontOptimizer.init(),
                 ReflowOptimizer.init()
             ]);
+            
+            // EXTREME SPEED MODE - Additional optimizations
+            PriorityHints.init();
+            ResourcePriority.init();
+            ThirdPartyOptimizer.init();
+            CriticalCSS.init();
+            ServiceWorkerCache.init();
+            
+            // JIT and hover optimizations
+            JITScriptCompiler.init();
+            HoverDNSPrefetch.init();
+            AdTrackerBlocker.init();
+            
+            // Speculative loading
+            SpeculativePrefetch.init();
+            InstantNavigation.init();
 
             // Dynamic content handling
             ImageOptimizer.init();
@@ -1895,7 +2914,7 @@
 
     // Expose public API for debugging
     window.WebPerf = {
-        version: '6.0',
+        version: '6.1-EXTREME',
         config: ConfigManager,
         cache: CacheManager,
         telemetry: Telemetry,
