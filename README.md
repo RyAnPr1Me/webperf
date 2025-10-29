@@ -2,6 +2,8 @@
 
 A comprehensive collection of Tampermonkey scripts designed to dramatically improve web performance, enhance streaming quality, and protect your privacy.
 
+> **🚀 New User?** Check out the [Quick Start Guide](QUICKSTART.md) for easy installation and setup!
+
 ## 📦 Scripts Included
 
 ### 1. **Web Performance Suite (webperf.js)** - Universal Performance Optimizer
