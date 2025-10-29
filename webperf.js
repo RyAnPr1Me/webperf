@@ -1794,7 +1794,7 @@
             if (!ConfigManager.isEnabled('blockThirdParty')) return;
             
             this.optimizeScripts();
-            this.deferNonCriticalRequests();
+            // Note: fetch deferral is now handled by AdTrackerBlocker to avoid conflicts
             
             Logger.info('Third-party optimizer enabled');
         },
@@ -1852,10 +1852,12 @@
                 const url = args[0];
                 if (this.shouldDefer(url)) {
                     // Delay until page is interactive
-                    return new Promise((resolve) => {
+                    return new Promise((resolve, reject) => {
                         SafeScheduler.idle(() => {
                             Logger.log('Deferred fetch:', url);
-                            resolve(originalFetch.apply(this, args));
+                            originalFetch.apply(this, args)
+                                .then(resolve)
+                                .catch(reject);
                         });
                     });
                 }
@@ -1886,7 +1888,18 @@
             
             for (const link of stylesheets) {
                 try {
+                    // Check if same-origin to avoid CORS issues
+                    const url = new URL(link.href, location.href);
+                    if (url.origin !== location.origin) {
+                        Logger.log('Skipping cross-origin CSS:', link.href);
+                        continue;
+                    }
+                    
                     const response = await fetch(link.href);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
                     const css = await response.text();
                     
                     // Create inline style
@@ -2092,9 +2105,19 @@
                 const cached = this.pageCache.get(url);
                 
                 if (cached) {
-                    // Instant restore from cache
-                    document.documentElement.innerHTML = cached;
-                    Logger.log('Instant navigation:', url);
+                    // Safely restore from cache using DOMParser to avoid XSS
+                    try {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(cached, 'text/html');
+                        
+                        // Clear and rebuild document safely
+                        document.documentElement.replaceWith(doc.documentElement);
+                        Logger.log('Instant navigation:', url);
+                    } catch (e) {
+                        Logger.warn('Failed to restore cached page:', e);
+                        // Fall back to normal navigation
+                        location.reload();
+                    }
                 }
             });
         }
@@ -2429,15 +2452,31 @@
         },
         
         blockRequests() {
-            // Block fetch requests
+            // Combine blocking and deferring logic to avoid conflicts
             const originalFetch = window.fetch;
             window.fetch = (...args) => {
                 const url = args[0];
+                
+                // Check if should be blocked first
                 if (this.isBlocked(url)) {
                     this.blockedCount++;
                     Logger.log('Blocked fetch:', url);
                     return Promise.reject(new Error('Blocked by AdTrackerBlocker'));
                 }
+                
+                // Check if should be deferred (from ThirdPartyOptimizer)
+                if (ThirdPartyOptimizer && ThirdPartyOptimizer.shouldDefer && 
+                    ThirdPartyOptimizer.shouldDefer(url)) {
+                    return new Promise((resolve, reject) => {
+                        SafeScheduler.idle(() => {
+                            Logger.log('Deferred fetch:', url);
+                            originalFetch.apply(this, args)
+                                .then(resolve)
+                                .catch(reject);
+                        });
+                    });
+                }
+                
                 return originalFetch.apply(this, args);
             };
             
@@ -2460,8 +2499,8 @@
                     for (const node of mutation.addedNodes) {
                         if (node.tagName === 'SCRIPT' && node.src) {
                             if (this.isBlocked(node.src)) {
-                                node.type = 'javascript/blocked';
-                                node.src = '';
+                                // Remove the element to prevent any requests
+                                node.remove();
                                 this.blockedCount++;
                                 Logger.log('Blocked script:', node.src);
                             }
@@ -2480,8 +2519,7 @@
             // Block existing scripts
             document.querySelectorAll('script[src]').forEach(script => {
                 if (this.isBlocked(script.src)) {
-                    script.type = 'javascript/blocked';
-                    script.src = '';
+                    script.remove();
                     this.blockedCount++;
                     Logger.log('Blocked existing script:', script.src);
                 }
