@@ -1794,7 +1794,9 @@
             if (!ConfigManager.isEnabled('blockThirdParty')) return;
             
             this.optimizeScripts();
-            // Note: fetch deferral is now handled by AdTrackerBlocker to avoid conflicts
+            // Note: Fetch deferral logic moved to AdTrackerBlocker to avoid
+            // multiple fetch override conflicts. AdTrackerBlocker checks
+            // this.shouldDefer() method for deferred domains integration.
             
             Logger.info('Third-party optimizer enabled');
         },
@@ -2452,20 +2454,24 @@
         },
         
         blockRequests() {
-            // Combine blocking and deferring logic to avoid conflicts
+            // Unified fetch override handling both blocking and deferring
+            // This consolidates AdTrackerBlocker and ThirdPartyOptimizer logic
+            // to prevent multiple override conflicts
             const originalFetch = window.fetch;
             window.fetch = (...args) => {
                 const url = args[0];
                 
-                // Check if should be blocked first
+                // Priority 1: Check if should be blocked (ads/trackers)
                 if (this.isBlocked(url)) {
                     this.blockedCount++;
                     Logger.log('Blocked fetch:', url);
                     return Promise.reject(new Error('Blocked by AdTrackerBlocker'));
                 }
                 
-                // Check if should be deferred (from ThirdPartyOptimizer)
-                if (ThirdPartyOptimizer && ThirdPartyOptimizer.shouldDefer && 
+                // Priority 2: Check if should be deferred (analytics/non-critical)
+                // Safe check: only defer if ThirdPartyOptimizer is initialized
+                if (typeof ThirdPartyOptimizer !== 'undefined' && 
+                    ThirdPartyOptimizer.shouldDefer && 
                     ThirdPartyOptimizer.shouldDefer(url)) {
                     return new Promise((resolve, reject) => {
                         SafeScheduler.idle(() => {
@@ -2477,6 +2483,7 @@
                     });
                 }
                 
+                // Priority 3: Allow normal requests
                 return originalFetch.apply(this, args);
             };
             
