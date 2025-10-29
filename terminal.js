@@ -10,7 +10,7 @@
 (function() {
     'use strict';
     document.addEventListener('keydown', function(e) {
-        if(e.ctrlKey && e.shiftKey && e.code==='KeyE'){
+        if(e.ctrlKey && e.shiftKey && e.code==='KeyP'){
             e.preventDefault();
             const terminalTab = window.open('', '_blank');
             if(!terminalTab) return;
