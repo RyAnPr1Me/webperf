@@ -646,7 +646,9 @@
             
             if (video) {
                 stats += `Resolution: ${video.videoWidth}x${video.videoHeight}<br>`;
-                stats += `FPS: ${Math.round(video.getVideoPlaybackQuality?.()?.totalVideoFrames / video.currentTime || 0)}<br>`;
+                const fps = video.currentTime > 0 ? 
+                    Math.round(video.getVideoPlaybackQuality?.()?.totalVideoFrames / video.currentTime || 0) : 0;
+                stats += `FPS: ${fps}<br>`;
                 stats += `Buffered: ${video.buffered.length > 0 ? Math.round(video.buffered.end(0)) : 0}s<br>`;
             }
             

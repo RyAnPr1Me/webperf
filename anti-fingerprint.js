@@ -192,7 +192,7 @@
                 
                 // Add minimal noise to prevent fingerprinting
                 for (let i = 0; i < imageData.data.length; i += 4) {
-                    imageData.data[i] = Math.min(255, imageData.data[i] + Math.floor(noise * 255));
+                    imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + Math.floor(noise * 255)));
                 }
                 
                 ctx.putImageData(imageData, 0, 0);
@@ -209,7 +209,7 @@
         
         const noise = Config.sessionData.canvasNoise;
         for (let i = 0; i < imageData.data.length; i += 4) {
-            imageData.data[i] = Math.min(255, imageData.data[i] + Math.floor(noise * 255));
+            imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + Math.floor(noise * 255)));
         }
     };
     
@@ -461,15 +461,20 @@
         spoofScreenProperties() {
             const offset = Config.sessionData.screenOffset;
             
-            // Common screen resolutions to blend in
-            const commonResolutions = [
-                { width: 1920, height: 1080 },
-                { width: 1366, height: 768 },
-                { width: 1440, height: 900 },
-                { width: 1536, height: 864 }
-            ];
+            // Use session-consistent screen resolution
+            if (!Config.sessionData.screenResolution) {
+                // Common screen resolutions to blend in
+                const commonResolutions = [
+                    { width: 1920, height: 1080 },
+                    { width: 1366, height: 768 },
+                    { width: 1440, height: 900 },
+                    { width: 1536, height: 864 }
+                ];
+                
+                Config.sessionData.screenResolution = commonResolutions[Math.floor(Math.random() * commonResolutions.length)];
+            }
             
-            const spoofed = commonResolutions[Math.floor(Math.random() * commonResolutions.length)];
+            const spoofed = Config.sessionData.screenResolution;
             
             Object.defineProperties(window.screen, {
                 width: { value: spoofed.width, configurable: true },
@@ -542,9 +547,12 @@
         },
         
         blockWebRTC() {
-            // Disable getUserMedia
+            // Disable getUserMedia with a function that returns rejected promise
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia = navigator.webkitGetUserMedia = navigator.mozGetUserMedia = undefined;
+                const blockedError = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+                navigator.mediaDevices.getUserMedia = blockedError;
+                navigator.webkitGetUserMedia = blockedError;
+                navigator.mozGetUserMedia = blockedError;
             }
             
             // Block RTCPeerConnection
