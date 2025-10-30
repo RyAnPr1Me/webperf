@@ -258,10 +258,10 @@
         },
 
         /**
-         * Current log level
+         * Current log level (set to WARN in production for better performance)
          * @type {number}
          */
-        currentLevel: 1,  // INFO by default
+        currentLevel: 2,  // WARN by default (changed from INFO for performance)
 
         /**
          * Format log message
@@ -271,6 +271,16 @@
          */
         format(level, message) {
             return `[WebPerf v6.1 EXTREME][${level}] ${message}`;
+        },
+
+        /**
+         * Simple log (no formatting, only when DEBUG level)
+         * @param {...any} args - Arguments to log
+         */
+        log(...args) {
+            if (this.currentLevel <= this.levels.DEBUG) {
+                console.log(...args);
+            }
         },
 
         /**
@@ -529,6 +539,12 @@
         },
 
         /**
+         * In-flight fetch requests to prevent duplicate fetches
+         * @type {Map<string, Promise>}
+         */
+        inFlightRequests: new Map(),
+
+        /**
          * Initialize cache
          */
         init() {
@@ -640,7 +656,7 @@
         },
 
         /**
-         * Fetch and cache resource
+         * Fetch and cache resource with deduplication
          * @param {string} url - Resource URL
          * @returns {Promise<string>} Object URL or original URL
          */
@@ -649,16 +665,30 @@
             const cached = this.get(url);
             if (cached) return cached;
 
-            try {
-                const response = await fetch(url, { cache: 'force-cache' });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                
-                const blob = await response.blob();
-                return this.set(url, blob);
-            } catch (e) {
-                Logger.debug(`Cache fetch failed for ${url}`, e);
-                return url;  // Return original URL on failure
+            // Check if already fetching this URL
+            if (this.inFlightRequests.has(url)) {
+                return this.inFlightRequests.get(url);
             }
+
+            // Create new fetch promise
+            const fetchPromise = (async () => {
+                try {
+                    const response = await fetch(url, { cache: 'force-cache' });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    
+                    const blob = await response.blob();
+                    return this.set(url, blob);
+                } catch (e) {
+                    Logger.debug(`Cache fetch failed for ${url}`, e);
+                    return url;  // Return original URL on failure
+                } finally {
+                    // Clean up in-flight tracking
+                    this.inFlightRequests.delete(url);
+                }
+            })();
+
+            this.inFlightRequests.set(url, fetchPromise);
+            return fetchPromise;
         },
 
         /**
@@ -1146,10 +1176,11 @@
     };
 
     /**
-     * DNS prefetch module
-     * @namespace DNSPrefetch
+     * Unified network optimization module (consolidates DNSPrefetch, Preconnect, EarlyHints)
+     * Reduces redundant DOM queries and duplicate hint creation
+     * @namespace NetworkOptimizer
      */
-    const DNSPrefetch = {
+    const NetworkOptimizer = {
         /**
          * Common CDN and service domains
          * @type {string[]}
@@ -1166,91 +1197,69 @@
         ],
 
         /**
-         * Initialize DNS prefetching
+         * Cache for processed hints
+         * @type {Set<string>}
+         */
+        processedHints: new Set(),
+
+        /**
+         * Initialize network optimization (consolidates DNS prefetch, preconnect, and early hints)
          */
         async init() {
-            if (!ConfigManager.isEnabled('dnsPrefetch')) return;
+            const dnsPrefetchEnabled = ConfigManager.isEnabled('dnsPrefetch');
+            const preconnectEnabled = ConfigManager.isEnabled('preconnect');
+            const earlyHintsEnabled = ConfigManager.isEnabled('earlyHints');
+            
+            if (!dnsPrefetchEnabled && !preconnectEnabled && !earlyHintsEnabled) return;
 
             SafeScheduler.idle(() => {
-                const domains = this.extractDomains();
+                // Single DOM query instead of multiple queries across modules
+                const { domains, origins } = this.extractExternalResources();
+                
+                // Add common domains
                 const allDomains = [...new Set([...this.commonDomains, ...domains])];
                 
-                allDomains.forEach(domain => {
-                    const link = DOMHelper.createElement('link', {
-                        rel: 'dns-prefetch',
-                        href: `//${domain}`
-                    });
-                    DOMHelper.appendToHead(link);
-                });
+                // Process critical origins first for early hints
+                if (earlyHintsEnabled) {
+                    const criticalOrigins = [
+                        location.origin,
+                        ...origins.filter(o => this.isCriticalOrigin(o)).slice(0, 5)
+                    ];
+                    criticalOrigins.forEach(origin => this.addPreconnect(origin));
+                }
+                
+                // Add preconnect for top external origins
+                if (preconnectEnabled) {
+                    origins.slice(0, 10).forEach(origin => this.addPreconnect(origin));
+                    Telemetry.increment('preconnectedDomains', Math.min(origins.length, 10));
+                }
+                
+                // Add DNS prefetch for remaining domains
+                if (dnsPrefetchEnabled) {
+                    allDomains.forEach(domain => this.addDNSPrefetch(domain));
+                }
 
-                Logger.info(`DNS prefetch: ${allDomains.length} domains`);
+                Logger.info(`Network hints: ${this.processedHints.size} resources optimized`);
             });
         },
 
         /**
-         * Extract external domains from page
-         * @returns {string[]} Array of domains
+         * Extract external resources with single DOM query
+         * @returns {{domains: string[], origins: string[]}} Domains and origins
          */
-        extractDomains() {
+        extractExternalResources() {
             const domains = new Set();
-            const selector = 'a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]';
+            const origins = new Set();
             
-            document.querySelectorAll(selector).forEach(el => {
+            // Single comprehensive query
+            const selector = 'a[href^="http"], link[href^="http"], script[src^="http"], img[src^="http"]';
+            const elements = document.querySelectorAll(selector);
+            
+            elements.forEach(el => {
                 try {
                     const url = new URL(el.href || el.src);
                     if (url.hostname !== location.hostname) {
                         domains.add(url.hostname);
-                    }
-                } catch (e) {
-                    // Invalid URL, skip
-                }
-            });
-
-            return Array.from(domains);
-        }
-    };
-
-    /**
-     * Preconnect module
-     * @namespace Preconnect
-     */
-    const Preconnect = {
-        /**
-         * Initialize preconnect
-         */
-        async init() {
-            if (!ConfigManager.isEnabled('preconnect')) return;
-
-            SafeScheduler.idle(() => {
-                const origins = this.extractOrigins();
-                
-                // Limit to top 10 most important origins
-                origins.slice(0, 10).forEach(origin => {
-                    const link = DOMHelper.createElement('link', {
-                        rel: 'preconnect',
-                        href: origin,
-                        crossorigin: 'anonymous'
-                    });
-                    DOMHelper.appendToHead(link);
-                });
-
-                Telemetry.increment('preconnectedDomains', origins.length);
-                Logger.info(`Preconnect: ${Math.min(origins.length, 10)} origins`);
-            });
-        },
-
-        /**
-         * Extract external origins from page
-         * @returns {string[]} Array of origins
-         */
-        extractOrigins() {
-            const origins = new Set();
-            const selector = 'link[href^="http"], script[src^="http"], img[src^="http"]';
-            
-            document.querySelectorAll(selector).forEach(el => {
-                try {
-                    const url = new URL(el.href || el.src);
-                    if (url.hostname !== location.hostname) {
                         origins.add(url.origin);
                     }
                 } catch (e) {
@@ -1258,7 +1267,53 @@
                 }
             });
 
-            return Array.from(origins);
+            return {
+                domains: Array.from(domains),
+                origins: Array.from(origins)
+            };
+        },
+
+        /**
+         * Check if origin is critical (CDN, API, static assets)
+         * @param {string} origin - Origin URL
+         * @returns {boolean} True if critical
+         */
+        isCriticalOrigin(origin) {
+            const criticalKeywords = ['cdn', 'api', 'static', 'assets', 'fonts', 'ajax'];
+            return criticalKeywords.some(keyword => origin.includes(keyword));
+        },
+
+        /**
+         * Add DNS prefetch hint (deduplicated)
+         * @param {string} domain - Domain name
+         */
+        addDNSPrefetch(domain) {
+            const key = `dns-prefetch:${domain}`;
+            if (this.processedHints.has(key)) return;
+            
+            const link = DOMHelper.createElement('link', {
+                rel: 'dns-prefetch',
+                href: `//${domain}`
+            });
+            DOMHelper.appendToHead(link);
+            this.processedHints.add(key);
+        },
+
+        /**
+         * Add preconnect hint (deduplicated)
+         * @param {string} origin - Origin URL
+         */
+        addPreconnect(origin) {
+            const key = `preconnect:${origin}`;
+            if (this.processedHints.has(key)) return;
+            
+            const link = DOMHelper.createElement('link', {
+                rel: 'preconnect',
+                href: origin,
+                crossorigin: 'anonymous'
+            });
+            DOMHelper.appendToHead(link);
+            this.processedHints.add(key);
         }
     };
 
@@ -1609,47 +1664,7 @@
         }
     };
 
-    /**
-     * Early Hints optimizer
-     * Simulates HTTP 103 Early Hints for instant resource discovery
-     * @namespace EarlyHints
-     */
-    const EarlyHints = {
-        init() {
-            if (!ConfigManager.isEnabled('earlyHints')) return;
-            
-            // Inject critical resource hints immediately
-            this.injectCriticalHints();
-            Logger.info('Early Hints enabled');
-        },
-        
-        injectCriticalHints() {
-            const criticalOrigins = [
-                location.origin,
-                'https://fonts.googleapis.com',
-                'https://fonts.gstatic.com',
-                'https://cdn.jsdelivr.net',
-                'https://cdnjs.cloudflare.com'
-            ];
-            
-            criticalOrigins.forEach(origin => {
-                // Preconnect to critical origins
-                const preconnect = DOMHelper.createElement('link', {
-                    rel: 'preconnect',
-                    href: origin,
-                    crossorigin: 'anonymous'
-                });
-                DOMHelper.appendToHead(preconnect);
-                
-                // DNS prefetch as fallback
-                const dnsPrefetch = DOMHelper.createElement('link', {
-                    rel: 'dns-prefetch',
-                    href: origin
-                });
-                DOMHelper.appendToHead(dnsPrefetch);
-            });
-        }
-    };
+    // EarlyHints module removed - functionality now consolidated into NetworkOptimizer for better efficiency
 
     /**
      * Speculative prefetching
@@ -2625,19 +2640,34 @@
                     zIndex: '999999',
                     pointerEvents: 'auto',
                     maxWidth: '250px',
-                    lineHeight: '1.4'
+                    lineHeight: '1.4',
+                    whiteSpace: 'pre-line'
                 }
             });
 
             await DOMHelper.appendToBody(this.panel);
 
-            // Update every second
-            this.updateInterval = setInterval(() => this.update(), 1000);
-            this.update();
+            // Use requestAnimationFrame for efficient updates instead of setInterval
+            this.scheduleUpdate();
         },
 
         /**
-         * Update panel content
+         * Schedule next update using requestAnimationFrame
+         */
+        scheduleUpdate() {
+            if (!this.panel) return;
+            
+            this.update();
+            // Update at 1fps instead of constant polling
+            setTimeout(() => {
+                if (this.panel) {
+                    requestAnimationFrame(() => this.scheduleUpdate());
+                }
+            }, 1000);
+        },
+
+        /**
+         * Update panel content (optimized with textContent)
          */
         update() {
             if (!this.panel) return;
@@ -2646,26 +2676,21 @@
             const metrics = Telemetry.getAll();
             const blockedCount = AdTrackerBlocker.getBlockedCount ? AdTrackerBlocker.getBlockedCount() : 0;
 
-            this.panel.innerHTML = `
-                <strong>WebPerf v6.1 EXTREME</strong><br>
-                FPS: ${FPSManager.fpsTarget}<br>
-                Cache: ${cacheStats.hits}/${cacheStats.hits + cacheStats.misses} hits (${cacheStats.mb} MB)<br>
-                Images: ${metrics.rewrittenImages}<br>
-                Scripts: ${metrics.deferredScripts} deferred<br>
-                Blocked: ${blockedCount} ads/trackers<br>
-                Observers: ${metrics.observerCount}<br>
-                Uptime: ${Telemetry.getUptime()}s
-            `;
+            // Use textContent instead of innerHTML for better performance (no parsing)
+            this.panel.textContent = `WebPerf v6.1 EXTREME
+FPS: ${FPSManager.fpsTarget}
+Cache: ${cacheStats.hits}/${cacheStats.hits + cacheStats.misses} hits (${cacheStats.mb} MB)
+Images: ${metrics.rewrittenImages}
+Scripts: ${metrics.deferredScripts} deferred
+Blocked: ${blockedCount} ads/trackers
+Observers: ${metrics.observerCount}
+Uptime: ${Telemetry.getUptime()}s`;
         },
 
         /**
          * Remove panel
          */
         remove() {
-            if (this.updateInterval) {
-                clearInterval(this.updateInterval);
-                this.updateInterval = null;
-            }
             if (this.panel) {
                 this.panel.remove();
                 this.panel = null;
@@ -2826,33 +2851,32 @@
          * Initialize all features
          */
         async initializeFeatures() {
-            // EXTREME SPEED MODE - Early hints (run first for instant resource discovery)
-            EarlyHints.init();
+            // EXTREME SPEED MODE - Early resource discovery
             PreloadScanner.init();
             
             // FPS management first (affects rendering)
             FPSManager.init();
 
-            // Resource hints (early network optimization)
+            // Optimize with parallel async initialization for independent modules
             await Promise.all([
-                DNSPrefetch.init(),
-                Preconnect.init(),
-                PreloadCritical.init()
-            ]);
-
-            // Content optimization
-            await Promise.all([
+                // Network optimization (consolidated DNS prefetch, preconnect, early hints)
+                NetworkOptimizer.init(),
+                PreloadCritical.init(),
+                
+                // Content optimization
                 HardwareAccel.init(),
                 FontOptimizer.init(),
-                ReflowOptimizer.init()
+                ReflowOptimizer.init(),
+                
+                // EXTREME SPEED MODE - Additional optimizations
+                ServiceWorkerCache.init()
             ]);
             
-            // EXTREME SPEED MODE - Additional optimizations
+            // Sync optimizations (require DOM to be fully ready)
             PriorityHints.init();
             ResourcePriority.init();
             ThirdPartyOptimizer.init();
             CriticalCSS.init();
-            ServiceWorkerCache.init();
             
             // JIT and hover optimizations
             JITScriptCompiler.init();
@@ -2863,9 +2887,11 @@
             SpeculativePrefetch.init();
             InstantNavigation.init();
 
-            // Dynamic content handling
-            ImageOptimizer.init();
-            LazyLoader.init();
+            // Dynamic content handling (parallel where possible)
+            await Promise.all([
+                ImageOptimizer.init(),
+                LazyLoader.init()
+            ]);
             ScriptDeferral.init();
             ParallelPrefetch.init();
 
