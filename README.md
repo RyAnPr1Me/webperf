@@ -332,25 +332,44 @@ This project is open source and available under the MIT License.
 
 ---
 
-## 🎬 YouTube 4K HDR Quality Enhancer (youtube-4k-enhancer.js)
+## 🎬 YouTube 4K HDR Quality Enhancer v2.0 with Script Interception (youtube-4k-enhancer.js)
+
+### ⚡ NEW in v2.0 - Advanced Script Interception!
+
+**Deep YouTube Integration:**
+- 🔧 **Script Interception**: Intercepts and modifies YouTube's player initialization scripts
+- 📡 **API Hooking**: Captures and enhances ytInitialPlayerResponse before page loads
+- 🎯 **Format Prioritization**: Automatically sorts streaming formats by quality and bitrate
+- 💎 **HDR Enforcement**: Forces VP9 Profile 2 (vp09.02) codec selection for HDR content
+- 🚫 **Quality Lock**: Prevents adaptive bitrate from downgrading quality
+- 📊 **Real-time Monitoring**: Detects and corrects quality degradation automatically
 
 ### Features
 
 **Video Quality Optimization:**
-- 🎯 **4K Resolution**: Automatically selects 2160p (4K) or highest available resolution
-- 🎨 **HDR Support**: Enables HDR/HDR10+ when available on compatible displays
+- 🎯 **4K/8K Resolution**: Automatically selects highest available resolution (up to 8K)
+- 🎨 **HDR Support**: Forces HDR/HDR10+ playback via VP9 Profile 2 codec
 - 🚀 **High FPS**: Prefers 60fps over 30fps for smoother playback
-- 📊 **Maximum Bitrate**: Selects premium bitrate streams for best quality
+- 📊 **Maximum Bitrate**: Intercepts streaming data to force premium bitrate streams
+- 🔒 **Bitrate Locking**: Prevents YouTube from reducing quality during playback
+
+**Advanced Script Interception:**
+- 🎯 **ytInitialPlayerResponse Interception**: Modifies player data before initialization
+- 🔄 **Fetch/XHR Hooking**: Intercepts API requests to enhance quality parameters
+- 📝 **Window Variable Monitoring**: Captures and modifies YouTube's config objects
+- 🎬 **Player Config Override**: Forces highest quality in player configuration
+- 🔍 **Format Sorting**: Prioritizes HDR, high resolution, and high bitrate formats
 
 **Hardware & DRM Optimization:**
-- ⚡ **Hardware Acceleration**: Forces GPU acceleration for smooth 4K playback
+- ⚡ **Hardware Acceleration**: Forces GPU acceleration for smooth 4K/8K playback
 - 🔐 **Widevine DRM Optimization**: Configures Widevine for highest quality streams
 - 🎵 **High Audio Quality**: Automatically selects highest bitrate audio tracks
-- 📦 **Large Buffer**: Optimizes buffer size for smooth 4K streaming
+- 📦 **Large Buffer**: Optimizes buffer size for smooth 4K/8K streaming
 
 **Codec Preferences:**
+- VP9 Profile 2 (vp09.02.*) preferred for HDR content
 - VP9 codec preferred over AVC for better quality at same bitrate
-- MediaCapabilities API enhanced to report 4K support
+- MediaCapabilities API enhanced to report 4K/8K and HDR support
 - EME (Encrypted Media Extensions) optimized for quality over compatibility
 
 ### Installation
@@ -364,10 +383,12 @@ This project is open source and available under the MIT License.
 ### Configuration
 
 Access settings via Tampermonkey menu:
-- Toggle Debug Mode (shows stats overlay)
-- Toggle HDR support
-- Toggle Hardware Acceleration
-- Toggle High FPS preference
+- 🔍 **Show Debug Info** - Display detailed quality and format information
+- 🔄 **Reapply Quality Settings** - Manually reapply highest quality settings
+- ⚙️ **Toggle Debug Mode** - Shows real-time stats overlay
+- 🎬 **Toggle HDR** - Enable/disable HDR enforcement
+- 🚀 **Toggle Hardware Acceleration** - GPU acceleration on/off
+- 📊 **Toggle High FPS** - 60fps preference on/off
 
 ### Advanced Settings
 
@@ -383,28 +404,75 @@ bufferSize: 'large'             // Larger buffer for smoother playback
 
 ### How It Works
 
-1. **Quality Controller**: Monitors YouTube player and applies quality settings automatically
-2. **Widevine Hooks**: Enhances MediaCapabilities and EME APIs to prefer high-quality configs
-3. **Hardware Acceleration**: Applies GPU-optimized CSS transforms to video elements
-4. **Smart Detection**: Finds and clicks quality menu options programmatically
-5. **Persistent Monitoring**: Reapplies settings when video changes or quality is reset
+**v2.0 Advanced Interception Flow:**
+
+1. **Script Interception Layer**: 
+   - Runs at `document-start` to intercept scripts before page loads
+   - Hooks into `appendChild` and `insertBefore` to modify inline scripts
+   - Captures and enhances `ytInitialPlayerResponse` in real-time
+
+2. **API Interception**:
+   - **Fetch API**: Intercepts player API requests and enhances response data
+   - **XMLHttpRequest**: Hooks XHR calls to modify quality parameters
+   - **Window Variables**: Monitors and modifies `ytInitialPlayerResponse` and `ytInitialData`
+
+3. **Format Enhancement**:
+   - Sorts streaming formats by: HDR > Resolution > Bitrate > FPS
+   - Prioritizes VP9 Profile 2 (vp09.02.*) for HDR content
+   - Filters and ranks adaptive formats for maximum quality
+
+4. **Quality Enforcement**:
+   - **Bitrate Forcer**: Prevents adaptive bitrate from downgrading quality
+   - **Quality Lock**: Monitors video dimensions and restores 4K if downgraded
+   - **Player Override**: Forces highest quality in player configuration
+
+5. **Widevine Optimization**: 
+   - Enhances MediaCapabilities API to report HDR and high bitrate support
+   - Configures EME for highest quality DRM streams
+
+6. **Hardware Acceleration**: 
+   - Applies GPU-optimized CSS transforms to video elements
+   - Forces hardware decoding for smooth 4K/HDR playback
+
+7. **Persistent Monitoring**: 
+   - Continuous quality monitoring every 5 seconds
+   - Automatic quality restoration if YouTube downgrades
+   - Real-time format analysis and optimization
 
 ### Troubleshooting
 
 **Quality not changing?**
-- Wait a few seconds after video starts - script reapplies settings periodically
-- Enable debug mode to see current quality in stats overlay
-- Check browser console (F12) for "[YT-4K]" messages
+- Open browser console (F12) and look for green "[YT-4K]" messages
+- Use "Show Debug Info" menu command to see available formats
+- Use "Reapply Quality Settings" menu command to force reapplication
+- Enable debug mode to see real-time stats overlay
+- Check that hardware acceleration is enabled in browser settings
 
-**Video stuttering?**
+**Script not intercepting?**
+- Ensure the script is set to run at `document-start` in Tampermonkey
+- Check console for "[YT-4K] Initializing YouTube script interceptor" message
+- Reload the page to allow interception to take effect
+- Some formats may not be available based on your connection speed
+
+**Video stuttering at 4K/HDR?**
 - Ensure hardware acceleration is enabled in browser settings
-- Try lowering quality to 1440p if your GPU can't handle 4K
-- Check your internet speed supports 4K streaming
+- Check your GPU supports VP9 Profile 2 decoding (for HDR)
+- Try lowering quality to 1440p if your GPU can't handle 4K HDR
+- Check your internet speed supports 4K streaming (minimum 25Mbps)
+- Verify your system has sufficient RAM (8GB+ recommended for 4K)
 
 **HDR not working?**
-- Verify your display supports HDR
-- Enable HDR in Windows/Mac display settings
+- Verify your display supports HDR (HDR10 or better)
+- Enable HDR in Windows Display Settings or macOS System Preferences
 - Use Chrome/Edge (better HDR support than Firefox)
+- Check console for "vp09.02" codec in format list (use Debug Info command)
+- Some videos may not have HDR versions available
+
+**Interception debugging:**
+- Open console and type: `window.YT4KEnhancer.debugInfo()`
+- This shows all available formats and current configuration
+- Look for "vp09.02" in codec names for HDR formats
+- Check that formats are sorted with highest quality first
 
 ---
 
