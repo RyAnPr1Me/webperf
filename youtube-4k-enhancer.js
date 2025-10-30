@@ -146,24 +146,37 @@
             try {
                 Logger.log('Enhancing player response object');
                 
-                // Use structuredClone if available (more efficient), fallback to JSON method
+                // Use structuredClone if available (more efficient)
+                // Fall back to simple object spread for shallow clone
                 let enhanced;
                 if (typeof structuredClone === 'function') {
-                    enhanced = structuredClone(response);
+                    try {
+                        enhanced = structuredClone(response);
+                    } catch (e) {
+                        // structuredClone failed (circular refs, etc), use shallow clone
+                        Logger.log('structuredClone failed, using shallow clone');
+                        enhanced = { ...response };
+                        if (response.streamingData) {
+                            enhanced.streamingData = { ...response.streamingData };
+                        }
+                    }
                 } else {
-                    // Fallback for older browsers
-                    enhanced = JSON.parse(JSON.stringify(response));
+                    // Shallow clone for older browsers (safer than JSON.parse/stringify)
+                    enhanced = { ...response };
+                    if (response.streamingData) {
+                        enhanced.streamingData = { ...response.streamingData };
+                    }
                 }
                 
                 if (enhanced.streamingData) {
-                    // Sort formats by quality
-                    if (enhanced.streamingData.formats) {
+                    // Sort formats by quality (in-place, no deep clone needed)
+                    if (enhanced.streamingData.formats && Array.isArray(enhanced.streamingData.formats)) {
                         enhanced.streamingData.formats.sort((a, b) => {
                             return (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0);
                         });
                     }
                     
-                    if (enhanced.streamingData.adaptiveFormats) {
+                    if (enhanced.streamingData.adaptiveFormats && Array.isArray(enhanced.streamingData.adaptiveFormats)) {
                         enhanced.streamingData.adaptiveFormats.sort((a, b) => {
                             // Prioritize HDR formats
                             const aIsHDR = a.mimeType && a.mimeType.includes('vp09.02');
@@ -324,8 +337,13 @@
         prefix: '[YT-4K]',
         
         log(...args) {
-            if (Config.get('debugMode')) {
-                console.log(this.prefix, ...args);
+            // Safe check for debug mode (handles case where Config not yet initialized)
+            try {
+                if (Config.current && Config.current.debugMode) {
+                    console.log(this.prefix, ...args);
+                }
+            } catch (e) {
+                // Config not initialized yet, skip debug logging
             }
         },
         
@@ -692,6 +710,7 @@
     const QualityController = {
         player: null,
         checkInterval: null,
+        monitoringInterval: null,
         appliedQuality: false,
         
         init() {
@@ -699,14 +718,41 @@
             Logger.info('Quality controller initialized');
         },
         
+        cleanup() {
+            if (this.checkInterval) {
+                clearInterval(this.checkInterval);
+                this.checkInterval = null;
+            }
+            if (this.monitoringInterval) {
+                clearInterval(this.monitoringInterval);
+                this.monitoringInterval = null;
+            }
+            Logger.log('QualityController cleanup complete');
+        },
+        
         waitForPlayer() {
-            // Try multiple methods to get the player
+            // Clear any existing interval
+            if (this.checkInterval) {
+                clearInterval(this.checkInterval);
+            }
+            
+            // Try multiple methods to get the player with timeout
+            let attempts = 0;
+            const maxAttempts = 60; // 30 seconds max
+            
             this.checkInterval = setInterval(() => {
+                attempts++;
                 this.player = this.getPlayer();
                 
                 if (this.player) {
                     clearInterval(this.checkInterval);
+                    this.checkInterval = null;
                     this.setupQualityMonitoring();
+                } else if (attempts >= maxAttempts) {
+                    // Timeout after 30 seconds
+                    clearInterval(this.checkInterval);
+                    this.checkInterval = null;
+                    Logger.warn('Player not found after 30 seconds, giving up');
                 }
             }, 500);
             
@@ -728,6 +774,11 @@
         setupQualityMonitoring() {
             Logger.log('Player found, setting up quality monitoring');
             
+            // Clear any existing monitoring interval
+            if (this.monitoringInterval) {
+                clearInterval(this.monitoringInterval);
+            }
+            
             // Apply quality immediately
             this.applyQualitySettings();
             
@@ -748,7 +799,7 @@
             }
             
             // Reapply periodically to ensure settings stick
-            setInterval(() => {
+            this.monitoringInterval = setInterval(() => {
                 if (!this.appliedQuality) {
                     this.applyQualitySettings();
                 }
@@ -1215,9 +1266,9 @@
             BitrateForcer.cleanup();
         }
         
-        // Clear quality check interval
-        if (QualityController && QualityController.checkInterval) {
-            clearInterval(QualityController.checkInterval);
+        // Cleanup QualityController intervals
+        if (QualityController && QualityController.cleanup) {
+            QualityController.cleanup();
         }
         
         // Clear stats overlay interval
@@ -1261,8 +1312,8 @@
             if (BitrateForcer && BitrateForcer.cleanup) {
                 BitrateForcer.cleanup();
             }
-            if (QualityController && QualityController.checkInterval) {
-                clearInterval(QualityController.checkInterval);
+            if (QualityController && QualityController.cleanup) {
+                QualityController.cleanup();
             }
             if (StatsOverlay && StatsOverlay.updateInterval) {
                 clearInterval(StatsOverlay.updateInterval);
