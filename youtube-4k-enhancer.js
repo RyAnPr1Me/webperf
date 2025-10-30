@@ -557,14 +557,21 @@
         },
         
         /**
+         * Store for active intervals and observers
+         */
+        activeMonitors: new WeakMap(),
+        mainObserver: null,
+        
+        /**
          * Force highest bitrate in streaming data
          */
         forceHighestBitrate() {
             // Create a MutationObserver to watch for video element
-            const observer = new MutationObserver(() => {
+            this.mainObserver = new MutationObserver((mutations) => {
                 const video = document.querySelector('video.html5-main-video');
-                if (video && !video.dataset.bitrateForced) {
-                    video.dataset.bitrateForced = 'true';
+                if (video && !this.activeMonitors.has(video)) {
+                    // Mark as monitored
+                    this.activeMonitors.set(video, {});
                     
                     // Monitor quality changes
                     video.addEventListener('loadedmetadata', () => {
@@ -583,6 +590,7 @@
                         // Check if video still exists in DOM
                         if (!document.contains(video)) {
                             clearInterval(qualityCheckInterval);
+                            this.activeMonitors.delete(video);
                             Logger.log('Video removed, cleared quality monitoring');
                             return;
                         }
@@ -599,28 +607,66 @@
                         }
                     }, 5000);
                     
-                    // Store interval ID for cleanup
-                    video.dataset.qualityIntervalId = qualityCheckInterval;
+                    // Store interval ID in WeakMap for proper cleanup
+                    const monitorData = this.activeMonitors.get(video);
+                    monitorData.intervalId = qualityCheckInterval;
                     
-                    // Cleanup on video removal or page unload
+                    // Cleanup on page unload
                     const cleanupInterval = () => {
-                        if (qualityCheckInterval) {
-                            clearInterval(qualityCheckInterval);
-                        }
+                        clearInterval(qualityCheckInterval);
+                        this.activeMonitors.delete(video);
+                        Logger.log('Cleaned up quality monitoring on unload');
                     };
                     
-                    video.addEventListener('remove', cleanupInterval, { once: true });
                     window.addEventListener('beforeunload', cleanupInterval, { once: true });
+                    
+                    // Also detect when video is removed using another observer
+                    const removalObserver = new MutationObserver((mutations) => {
+                        for (const mutation of mutations) {
+                            for (const removed of mutation.removedNodes) {
+                                if (removed === video || (removed.contains && removed.contains(video))) {
+                                    clearInterval(qualityCheckInterval);
+                                    removalObserver.disconnect();
+                                    this.activeMonitors.delete(video);
+                                    Logger.log('Video removed from DOM, cleaned up monitoring');
+                                    return;
+                                }
+                            }
+                        }
+                    });
+                    
+                    if (video.parentNode) {
+                        removalObserver.observe(video.parentNode, { childList: true });
+                    }
+                    
+                    monitorData.removalObserver = removalObserver;
                 }
             });
             
             if (document.body) {
-                observer.observe(document.body, { childList: true, subtree: true });
+                this.mainObserver.observe(document.body, { childList: true, subtree: true });
             } else {
                 document.addEventListener('DOMContentLoaded', () => {
-                    observer.observe(document.body, { childList: true, subtree: true });
+                    if (document.body) {
+                        this.mainObserver.observe(document.body, { childList: true, subtree: true });
+                    }
                 });
             }
+        },
+        
+        /**
+         * Cleanup method to disconnect observers
+         */
+        cleanup() {
+            if (this.mainObserver) {
+                this.mainObserver.disconnect();
+                this.mainObserver = null;
+            }
+            
+            // Clear all active monitoring intervals
+            // Note: WeakMap doesn't have iteration, so we can't manually clear
+            // but intervals will be cleared when videos are removed or page unloads
+            Logger.log('BitrateForcer cleanup complete');
         },
         
         /**
@@ -1159,6 +1205,28 @@
     App.init().catch(e => {
         Logger.error('Initialization failed:', e);
     });
+    
+    // Global cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        Logger.log('Page unloading, performing cleanup...');
+        
+        // Cleanup BitrateForcer observers and intervals
+        if (BitrateForcer && BitrateForcer.cleanup) {
+            BitrateForcer.cleanup();
+        }
+        
+        // Clear quality check interval
+        if (QualityController && QualityController.checkInterval) {
+            clearInterval(QualityController.checkInterval);
+        }
+        
+        // Clear stats overlay interval
+        if (StatsOverlay && StatsOverlay.updateInterval) {
+            clearInterval(StatsOverlay.updateInterval);
+        }
+        
+        Logger.log('Cleanup complete');
+    });
 
     // Expose API for debugging
     window.YT4KEnhancer = {
@@ -1166,6 +1234,7 @@
         config: Config,
         quality: QualityController,
         interceptor: ScriptInterceptor,
+        bitrateForcer: BitrateForcer,
         reapply: () => {
             QualityController.appliedQuality = false;
             QualityController.applyQualitySettings();
@@ -1186,6 +1255,19 @@
                     fps: f.fps
                 })));
             }
+        },
+        cleanup: () => {
+            Logger.log('Manual cleanup requested');
+            if (BitrateForcer && BitrateForcer.cleanup) {
+                BitrateForcer.cleanup();
+            }
+            if (QualityController && QualityController.checkInterval) {
+                clearInterval(QualityController.checkInterval);
+            }
+            if (StatsOverlay && StatsOverlay.updateInterval) {
+                clearInterval(StatsOverlay.updateInterval);
+            }
+            Logger.log('Manual cleanup complete');
         }
     };
 
