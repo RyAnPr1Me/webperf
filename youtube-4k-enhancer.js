@@ -361,6 +361,162 @@
     };
 
     /**
+     * YouTube Settings Override
+     * Bypasses YouTube's saved quality preferences in localStorage and cookies
+     * @namespace SettingsOverride
+     */
+    const SettingsOverride = {
+        init() {
+            Logger.info('Overriding YouTube settings to bypass quality restrictions...');
+            
+            // Override localStorage to intercept YouTube's quality preferences
+            this.overrideLocalStorage();
+            
+            // Override player preferences stored in yt.config_
+            this.overrideYTConfig();
+            
+            // Continuously reset any quality limitations
+            this.enforceQualityOverrides();
+            
+            Logger.info('YouTube settings override active');
+        },
+        
+        /**
+         * Override localStorage to prevent YouTube from saving/loading quality preferences
+         */
+        overrideLocalStorage() {
+            const originalSetItem = Storage.prototype.setItem;
+            const originalGetItem = Storage.prototype.getItem;
+            
+            Storage.prototype.setItem = function(key, value) {
+                // Intercept YouTube quality-related settings
+                if (key && typeof key === 'string') {
+                    // Block YouTube from saving lower quality preferences
+                    if (key.includes('yt-player-quality') || 
+                        key.includes('yt-player-bandaid') ||
+                        key.includes('yt-player-bandwidth')) {
+                        Logger.log('Blocked YouTube from saving quality preference:', key);
+                        return; // Don't save
+                    }
+                }
+                return originalSetItem.call(this, key, value);
+            };
+            
+            Storage.prototype.getItem = function(key) {
+                if (key && typeof key === 'string') {
+                    // Force highest quality when YouTube tries to read saved preferences
+                    if (key.includes('yt-player-quality')) {
+                        Logger.log('Overriding saved quality preference to force 4K');
+                        return JSON.stringify({quality: 'hd2160', previousQuality: 'hd2160'});
+                    }
+                }
+                return originalGetItem.call(this, key);
+            };
+        },
+        
+        /**
+         * Override YouTube's global config object
+         */
+        overrideYTConfig() {
+            // Monitor for yt.config_ object and override quality settings
+            const checkConfig = setInterval(() => {
+                if (window.yt && window.yt.config_) {
+                    clearInterval(checkConfig);
+                    
+                    // Override default quality settings
+                    if (window.yt.config_.PLAYER_VARS) {
+                        window.yt.config_.PLAYER_VARS.vq = 'hd2160'; // Force 4K
+                        Logger.log('Overrode yt.config_.PLAYER_VARS.vq to hd2160');
+                    }
+                    
+                    // Monitor for changes and re-apply
+                    const originalDefineProperty = Object.defineProperty;
+                    try {
+                        Object.defineProperty(window.yt.config_, 'PLAYER_VARS', {
+                            set(value) {
+                                if (value) {
+                                    value.vq = 'hd2160';
+                                }
+                                this._PLAYER_VARS = value;
+                            },
+                            get() {
+                                return this._PLAYER_VARS;
+                            },
+                            configurable: true
+                        });
+                    } catch (e) {
+                        Logger.log('Could not override PLAYER_VARS:', e);
+                    }
+                }
+            }, 100);
+            
+            // Clear after 10 seconds if not found
+            setTimeout(() => clearInterval(checkConfig), 10000);
+        },
+        
+        /**
+         * Continuously enforce quality overrides to bypass YouTube's adaptive logic
+         */
+        enforceQualityOverrides() {
+            // Periodically check and override any quality limitations
+            setInterval(() => {
+                try {
+                    const player = document.getElementById('movie_player');
+                    if (player) {
+                        // Override getPreferredQuality to always return highest
+                        if (player.getPreferredQuality && !player._qualityOverridden) {
+                            const original = player.getPreferredQuality;
+                            player.getPreferredQuality = function() {
+                                return 'hd2160'; // Always return 4K
+                            };
+                            player._qualityOverridden = true;
+                            Logger.log('Overrode player.getPreferredQuality()');
+                        }
+                        
+                        // Override any attempt to set quality below 4K
+                        if (player.setPlaybackQuality && !player._setQualityOverridden) {
+                            const originalSetQuality = player.setPlaybackQuality;
+                            player.setPlaybackQuality = function(quality) {
+                                // If YouTube tries to set quality below 4K, upgrade it
+                                const qualityOrder = ['tiny', 'small', 'medium', 'large', 'hd720', 'hd1080', 'hd1440', 'hd2160'];
+                                const targetIndex = qualityOrder.indexOf('hd2160');
+                                const requestedIndex = qualityOrder.indexOf(quality);
+                                
+                                if (requestedIndex < targetIndex && requestedIndex !== -1) {
+                                    Logger.log(`Intercepted quality downgrade attempt from hd2160 to ${quality}, blocking`);
+                                    return originalSetQuality.call(this, 'hd2160');
+                                }
+                                
+                                return originalSetQuality.call(this, quality);
+                            };
+                            player._setQualityOverridden = true;
+                            Logger.log('Overrode player.setPlaybackQuality() to prevent downgrades');
+                        }
+                        
+                        // Override network throttling detection
+                        if (player.getStatsForNerds && !player._statsOverridden) {
+                            const originalStats = player.getStatsForNerds;
+                            player.getStatsForNerds = function() {
+                                const stats = originalStats.call(this);
+                                // Report high bandwidth to prevent quality downgrades
+                                if (stats) {
+                                    stats.bandwidth = 999999999; // Report unlimited bandwidth
+                                    stats.bufferHealth = 100; // Report healthy buffer
+                                }
+                                return stats;
+                            };
+                            player._statsOverridden = true;
+                            Logger.log('Overrode network stats to prevent adaptive downgrade');
+                        }
+                    }
+                } catch (e) {
+                    // Ignore errors, just keep trying
+                }
+            }, 2000);
+        }
+    };
+
+    /**
      * Hardware acceleration optimizer
      * @namespace HWAccelOptimizer
      */
@@ -1223,6 +1379,9 @@
             
             // CRITICAL: Initialize script interceptor FIRST (must run before page scripts)
             ScriptInterceptor.init();
+            
+            // Override YouTube's settings to bypass quality restrictions
+            SettingsOverride.init();
             
             // Initialize components
             HWAccelOptimizer.init();
