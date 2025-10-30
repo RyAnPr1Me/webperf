@@ -90,6 +90,8 @@
 
         /**
          * Process script content to modify player data
+         * NOTE: This method is limited in scope - it only logs detection.
+         * Actual interception happens via window variable hooks which are safer.
          */
         processScript(script) {
             if (script.textContent) {
@@ -97,91 +99,9 @@
                 
                 // Check if this script contains ytInitialPlayerResponse
                 if (originalContent.includes('ytInitialPlayerResponse')) {
-                    try {
-                        Logger.log('Intercepting ytInitialPlayerResponse script');
-                        
-                        // Modify the script to enhance quality settings
-                        let modifiedContent = originalContent;
-                        
-                        // We'll inject our enhancement code after ytInitialPlayerResponse is defined
-                        const injectionCode = `
-                            (function() {
-                                if (typeof ytInitialPlayerResponse !== 'undefined' && ytInitialPlayerResponse) {
-                                    console.log('[YT-4K] Enhancing ytInitialPlayerResponse');
-                                    
-                                    // Force quality preferences in player response
-                                    if (ytInitialPlayerResponse.streamingData) {
-                                        const sd = ytInitialPlayerResponse.streamingData;
-                                        
-                                        // Prioritize highest quality formats
-                                        if (sd.formats) {
-                                            sd.formats.sort((a, b) => {
-                                                const qualityA = parseInt(a.height || 0);
-                                                const qualityB = parseInt(b.height || 0);
-                                                const bitrateA = parseInt(a.bitrate || 0);
-                                                const bitrateB = parseInt(b.bitrate || 0);
-                                                
-                                                // Sort by quality, then bitrate
-                                                if (qualityB !== qualityA) return qualityB - qualityA;
-                                                return bitrateB - bitrateA;
-                                            });
-                                            
-                                            console.log('[YT-4K] Sorted formats by quality:', sd.formats.map(f => f.height + 'p'));
-                                        }
-                                        
-                                        if (sd.adaptiveFormats) {
-                                            sd.adaptiveFormats.sort((a, b) => {
-                                                const qualityA = parseInt(a.height || 0);
-                                                const qualityB = parseInt(b.height || 0);
-                                                const bitrateA = parseInt(a.bitrate || 0);
-                                                const bitrateB = parseInt(b.bitrate || 0);
-                                                
-                                                // Prefer VP9 Profile 2 for HDR
-                                                const isHDRA = (a.mimeType && (a.mimeType.includes('vp09.02') || a.mimeType.includes('hdr'))) ? 1000000 : 0;
-                                                const isHDRB = (b.mimeType && (b.mimeType.includes('vp09.02') || b.mimeType.includes('hdr'))) ? 1000000 : 0;
-                                                
-                                                // Sort by HDR, then quality, then bitrate
-                                                if (isHDRA !== isHDRB) return isHDRB - isHDRA;
-                                                if (qualityB !== qualityA) return qualityB - qualityA;
-                                                return bitrateB - bitrateA;
-                                            });
-                                            
-                                            console.log('[YT-4K] Sorted adaptive formats:', 
-                                                sd.adaptiveFormats.slice(0, 5).map(f => ({
-                                                    height: f.height + 'p',
-                                                    mime: f.mimeType ? f.mimeType.split(';')[0] : 'unknown',
-                                                    bitrate: Math.round(f.bitrate / 1000) + 'kbps'
-                                                }))
-                                            );
-                                        }
-                                        
-                                        // Force high quality preferences
-                                        sd.expiresInSeconds = "21540"; // Extended expiry
-                                    }
-                                    
-                                    // Override playback config
-                                    if (ytInitialPlayerResponse.playbackTracking) {
-                                        ytInitialPlayerResponse.playbackTracking.videostatsPlaybackUrl = 
-                                            ytInitialPlayerResponse.playbackTracking.videostatsPlaybackUrl || {};
-                                    }
-                                }
-                            })();
-                        `;
-                        
-                        // Inject after ytInitialPlayerResponse definition
-                        if (modifiedContent.includes('var ytInitialPlayerResponse')) {
-                            modifiedContent = modifiedContent.replace(
-                                /var ytInitialPlayerResponse\s*=\s*{/,
-                                'var ytInitialPlayerResponse = {'
-                            ) + injectionCode;
-                        } else if (modifiedContent.includes('ytInitialPlayerResponse=')) {
-                            modifiedContent += injectionCode;
-                        }
-                        
-                        script.textContent = modifiedContent;
-                    } catch (e) {
-                        Logger.warn('Failed to modify ytInitialPlayerResponse script:', e);
-                    }
+                    // Log detection but don't modify inline scripts to avoid XSS risks
+                    // Instead, we rely on window variable interception which is safer
+                    Logger.log('Detected ytInitialPlayerResponse script (will intercept via window hooks)');
                 }
             }
         },
@@ -226,8 +146,14 @@
             try {
                 Logger.log('Enhancing player response object');
                 
-                // Deep clone to avoid modifying original
-                const enhanced = JSON.parse(JSON.stringify(response));
+                // Use structuredClone if available (more efficient), fallback to JSON method
+                let enhanced;
+                if (typeof structuredClone === 'function') {
+                    enhanced = structuredClone(response);
+                } else {
+                    // Fallback for older browsers
+                    enhanced = JSON.parse(JSON.stringify(response));
+                }
                 
                 if (enhanced.streamingData) {
                     // Sort formats by quality
@@ -298,46 +224,22 @@
 
         /**
          * Intercept XMLHttpRequest for quality changes
+         * Note: Simplified to avoid issues with immutable properties
          */
         interceptXHR() {
             this.originalXHROpen = XMLHttpRequest.prototype.open;
-            this.originalXHRSend = XMLHttpRequest.prototype.send;
             
             XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                // Just log player requests, don't modify responses to avoid conflicts
+                if (url && url.includes('/player')) {
+                    Logger.log('Detected XHR player request:', url);
+                }
                 this._ytUrl = url;
                 return ScriptInterceptor.originalXHROpen.call(this, method, url, ...rest);
             };
             
-            XMLHttpRequest.prototype.send = function(data) {
-                if (this._ytUrl && this._ytUrl.includes('/player')) {
-                    Logger.log('Intercepting XHR player request');
-                    
-                    const originalOnLoad = this.onload;
-                    this.onload = function() {
-                        try {
-                            if (this.responseText) {
-                                const response = JSON.parse(this.responseText);
-                                const enhanced = ScriptInterceptor.enhancePlayerResponse(response);
-                                
-                                Object.defineProperty(this, 'responseText', {
-                                    writable: true,
-                                    value: JSON.stringify(enhanced)
-                                });
-                                Object.defineProperty(this, 'response', {
-                                    writable: true,
-                                    value: JSON.stringify(enhanced)
-                                });
-                            }
-                        } catch (e) {
-                            Logger.log('XHR response modification error:', e);
-                        }
-                        
-                        if (originalOnLoad) originalOnLoad.apply(this, arguments);
-                    };
-                }
-                
-                return ScriptInterceptor.originalXHRSend.call(this, data);
-            };
+            // Note: We don't override XHR send/responses as it can break YouTube's code
+            // Instead, we rely on window variable interception and Fetch API hooks
         },
 
         /**
@@ -675,9 +577,16 @@
                         }
                     });
                     
-                    // Monitor for quality degradation
+                    // Monitor for quality degradation with proper cleanup
                     let lastHeight = 0;
-                    setInterval(() => {
+                    const qualityCheckInterval = setInterval(() => {
+                        // Check if video still exists in DOM
+                        if (!document.contains(video)) {
+                            clearInterval(qualityCheckInterval);
+                            Logger.log('Video removed, cleared quality monitoring');
+                            return;
+                        }
+                        
                         if (video.videoHeight !== lastHeight) {
                             Logger.log('Quality changed to:', video.videoHeight + 'p');
                             lastHeight = video.videoHeight;
@@ -689,6 +598,19 @@
                             }
                         }
                     }, 5000);
+                    
+                    // Store interval ID for cleanup
+                    video.dataset.qualityIntervalId = qualityCheckInterval;
+                    
+                    // Cleanup on video removal or page unload
+                    const cleanupInterval = () => {
+                        if (qualityCheckInterval) {
+                            clearInterval(qualityCheckInterval);
+                        }
+                    };
+                    
+                    video.addEventListener('remove', cleanupInterval, { once: true });
+                    window.addEventListener('beforeunload', cleanupInterval, { once: true });
                 }
             });
             
