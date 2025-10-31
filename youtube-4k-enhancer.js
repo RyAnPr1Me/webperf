@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         YouTube 4K HDR Quality Enhancer
+// @name         YouTube 4K HDR Quality Enhancer with Script Interception
 // @namespace    https://github.com/RyAnPr1ME/webperf
-// @version      1.0
-// @description  Forces 4K resolution, highest bitrate/FPS, HDR, hardware acceleration, and Widevine DRM optimization for YouTube playback
+// @version      2.0
+// @description  Intercepts YouTube scripts to force 4K/HDR resolution, highest bitrate/FPS, hardware acceleration, and optimal codec selection
 // @author       RyAnPr1Me
 // @match        *://*.youtube.com/*
 // @grant        GM_getValue
@@ -18,13 +18,14 @@
 // ==/UserScript==
 
 /**
- * YouTube 4K HDR Quality Enhancer
+ * YouTube 4K HDR Quality Enhancer with Script Interception
  * 
- * Automatically selects the highest quality settings for YouTube videos:
- * - 4K (2160p) or highest available resolution
- * - Maximum bitrate (Premium bitrate when available)
- * - Highest FPS (60fps when available)
- * - HDR/HDR10+ when available
+ * Advanced YouTube quality enhancement with deep script interception:
+ * - Intercepts ytInitialPlayerResponse to force highest quality formats
+ * - Modifies streaming data to prioritize 4K/8K HDR streams
+ * - Forces VP9 Profile 2 codec for HDR support
+ * - Overrides adaptive bitrate logic for maximum quality
+ * - Intercepts quality selection to prevent downgrades
  * - Hardware acceleration optimization
  * - Widevine DRM configuration for best quality
  * 
@@ -32,6 +33,255 @@
  */
 (() => {
     'use strict';
+
+    /**
+     * YouTube Script Interceptor
+     * Intercepts and modifies YouTube's player initialization data
+     * @namespace ScriptInterceptor
+     */
+    const ScriptInterceptor = {
+        originalFetch: null,
+        originalXHROpen: null,
+        originalXHRSend: null,
+
+        init() {
+            Logger.info('Initializing YouTube script interceptor...');
+            
+            // Intercept ytInitialPlayerResponse before page loads
+            this.interceptYtInitialData();
+            
+            // Intercept fetch requests for player data
+            this.interceptFetch();
+            
+            // Intercept XHR requests for quality changes
+            this.interceptXHR();
+            
+            // Intercept Object.defineProperty for ytplayer config
+            this.interceptPlayerConfig();
+
+            Logger.info('Script interceptor active');
+        },
+
+        /**
+         * Intercept ytInitialPlayerResponse and ytInitialData
+         */
+        interceptYtInitialData() {
+            // Hook into script loading to modify player response
+            const originalAppendChild = Element.prototype.appendChild;
+            const originalInsertBefore = Element.prototype.insertBefore;
+
+            Element.prototype.appendChild = function(child) {
+                if (child.tagName === 'SCRIPT') {
+                    ScriptInterceptor.processScript(child);
+                }
+                return originalAppendChild.call(this, child);
+            };
+
+            Element.prototype.insertBefore = function(child, reference) {
+                if (child.tagName === 'SCRIPT') {
+                    ScriptInterceptor.processScript(child);
+                }
+                return originalInsertBefore.call(this, child, reference);
+            };
+
+            // Also intercept window variables being set
+            this.interceptWindowVariables();
+        },
+
+        /**
+         * Process script content to modify player data
+         * NOTE: This method is limited in scope - it only logs detection.
+         * Actual interception happens via window variable hooks which are safer.
+         */
+        processScript(script) {
+            if (script.textContent) {
+                const originalContent = script.textContent;
+                
+                // Check if this script contains ytInitialPlayerResponse
+                if (originalContent.includes('ytInitialPlayerResponse')) {
+                    // Log detection but don't modify inline scripts to avoid XSS risks
+                    // Instead, we rely on window variable interception which is safer
+                    Logger.log('Detected ytInitialPlayerResponse script (will intercept via window hooks)');
+                }
+            }
+        },
+
+        /**
+         * Intercept window.ytInitialPlayerResponse and window.ytInitialData
+         */
+        interceptWindowVariables() {
+            let playerResponse = null;
+            let initialData = null;
+
+            // Define getters/setters to intercept these variables
+            Object.defineProperty(window, 'ytInitialPlayerResponse', {
+                get() {
+                    return playerResponse;
+                },
+                set(value) {
+                    Logger.log('Intercepting ytInitialPlayerResponse set');
+                    playerResponse = ScriptInterceptor.enhancePlayerResponse(value);
+                },
+                configurable: true
+            });
+
+            Object.defineProperty(window, 'ytInitialData', {
+                get() {
+                    return initialData;
+                },
+                set(value) {
+                    Logger.log('Intercepting ytInitialData set');
+                    initialData = value;
+                },
+                configurable: true
+            });
+        },
+
+        /**
+         * Enhance player response data to force highest quality
+         */
+        enhancePlayerResponse(response) {
+            if (!response) return response;
+
+            try {
+                Logger.log('Enhancing player response object');
+                
+                // Use structuredClone if available (more efficient)
+                // Fall back to simple object spread for shallow clone
+                let enhanced;
+                if (typeof structuredClone === 'function') {
+                    try {
+                        enhanced = structuredClone(response);
+                    } catch (e) {
+                        // structuredClone failed (circular refs, etc), use shallow clone
+                        Logger.log('structuredClone failed, using shallow clone');
+                        enhanced = { ...response };
+                        if (response.streamingData) {
+                            enhanced.streamingData = { ...response.streamingData };
+                        }
+                    }
+                } else {
+                    // Shallow clone for older browsers (safer than JSON.parse/stringify)
+                    enhanced = { ...response };
+                    if (response.streamingData) {
+                        enhanced.streamingData = { ...response.streamingData };
+                    }
+                }
+                
+                if (enhanced.streamingData) {
+                    // Sort formats by quality (in-place, no deep clone needed)
+                    if (enhanced.streamingData.formats && Array.isArray(enhanced.streamingData.formats)) {
+                        enhanced.streamingData.formats.sort((a, b) => {
+                            return (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0);
+                        });
+                    }
+                    
+                    if (enhanced.streamingData.adaptiveFormats && Array.isArray(enhanced.streamingData.adaptiveFormats)) {
+                        enhanced.streamingData.adaptiveFormats.sort((a, b) => {
+                            // Prioritize HDR formats
+                            const aIsHDR = a.mimeType && a.mimeType.includes('vp09.02');
+                            const bIsHDR = b.mimeType && b.mimeType.includes('vp09.02');
+                            
+                            if (aIsHDR && !bIsHDR) return -1;
+                            if (!aIsHDR && bIsHDR) return 1;
+                            
+                            return (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0);
+                        });
+                    }
+                }
+                
+                return enhanced;
+            } catch (e) {
+                Logger.warn('Failed to enhance player response:', e);
+                return response;
+            }
+        },
+
+        /**
+         * Intercept fetch API for player updates
+         */
+        interceptFetch() {
+            this.originalFetch = window.fetch;
+            
+            window.fetch = async function(...args) {
+                const url = args[0];
+                
+                try {
+                    const response = await ScriptInterceptor.originalFetch.apply(this, args);
+                    
+                    // Check if this is a player API request
+                    if (typeof url === 'string' && url.includes('/player')) {
+                        Logger.log('Intercepting player fetch:', url);
+                        
+                        const clonedResponse = response.clone();
+                        const data = await clonedResponse.json();
+                        
+                        // Enhance the response
+                        const enhanced = ScriptInterceptor.enhancePlayerResponse(data);
+                        
+                        // Return modified response
+                        return new Response(JSON.stringify(enhanced), {
+                            status: response.status,
+                            statusText: response.statusText,
+                            headers: response.headers
+                        });
+                    }
+                    
+                    return response;
+                } catch (e) {
+                    Logger.log('Fetch interception error:', e);
+                    return ScriptInterceptor.originalFetch.apply(this, args);
+                }
+            };
+        },
+
+        /**
+         * Intercept XMLHttpRequest for quality changes
+         * Note: Simplified to avoid issues with immutable properties
+         */
+        interceptXHR() {
+            this.originalXHROpen = XMLHttpRequest.prototype.open;
+            
+            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                // Just log player requests, don't modify responses to avoid conflicts
+                if (url && url.includes('/player')) {
+                    Logger.log('Detected XHR player request:', url);
+                }
+                this._ytUrl = url;
+                return ScriptInterceptor.originalXHROpen.call(this, method, url, ...rest);
+            };
+            
+            // Note: We don't override XHR send/responses as it can break YouTube's code
+            // Instead, we rely on window variable interception and Fetch API hooks
+        },
+
+        /**
+         * Intercept player configuration
+         */
+        interceptPlayerConfig() {
+            // Hook into ytplayer config
+            Object.defineProperty(window, 'ytplayer', {
+                get() {
+                    return this._ytplayer;
+                },
+                set(value) {
+                    Logger.log('Intercepting ytplayer config');
+                    
+                    if (value && value.config && value.config.args) {
+                        // Force quality settings in player config
+                        value.config.args.autoplay = '0';
+                        
+                        if (value.config.args.adaptive_fmts) {
+                            Logger.log('Found adaptive formats in config');
+                        }
+                    }
+                    
+                    this._ytplayer = value;
+                },
+                configurable: true
+            });
+        }
+    };
 
     /**
      * Configuration management
@@ -87,8 +337,13 @@
         prefix: '[YT-4K]',
         
         log(...args) {
-            if (Config.get('debugMode')) {
-                console.log(this.prefix, ...args);
+            // Safe check for debug mode (handles case where Config not yet initialized)
+            try {
+                if (Config.current && Config.current.debugMode) {
+                    console.log(this.prefix, ...args);
+                }
+            } catch (e) {
+                // Config not initialized yet, skip debug logging
             }
         },
         
@@ -102,6 +357,162 @@
         
         error(...args) {
             console.error(this.prefix, ...args);
+        }
+    };
+
+    /**
+     * YouTube Settings Override
+     * Bypasses YouTube's saved quality preferences in localStorage and cookies
+     * @namespace SettingsOverride
+     */
+    const SettingsOverride = {
+        init() {
+            Logger.info('Overriding YouTube settings to bypass quality restrictions...');
+            
+            // Override localStorage to intercept YouTube's quality preferences
+            this.overrideLocalStorage();
+            
+            // Override player preferences stored in yt.config_
+            this.overrideYTConfig();
+            
+            // Continuously reset any quality limitations
+            this.enforceQualityOverrides();
+            
+            Logger.info('YouTube settings override active');
+        },
+        
+        /**
+         * Override localStorage to prevent YouTube from saving/loading quality preferences
+         */
+        overrideLocalStorage() {
+            const originalSetItem = Storage.prototype.setItem;
+            const originalGetItem = Storage.prototype.getItem;
+            
+            Storage.prototype.setItem = function(key, value) {
+                // Intercept YouTube quality-related settings
+                if (key && typeof key === 'string') {
+                    // Block YouTube from saving lower quality preferences
+                    if (key.includes('yt-player-quality') || 
+                        key.includes('yt-player-bandaid') ||
+                        key.includes('yt-player-bandwidth')) {
+                        Logger.log('Blocked YouTube from saving quality preference:', key);
+                        return; // Don't save
+                    }
+                }
+                return originalSetItem.call(this, key, value);
+            };
+            
+            Storage.prototype.getItem = function(key) {
+                if (key && typeof key === 'string') {
+                    // Force highest quality when YouTube tries to read saved preferences
+                    if (key.includes('yt-player-quality')) {
+                        Logger.log('Overriding saved quality preference to force 4K');
+                        return JSON.stringify({quality: 'hd2160', previousQuality: 'hd2160'});
+                    }
+                }
+                return originalGetItem.call(this, key);
+            };
+        },
+        
+        /**
+         * Override YouTube's global config object
+         */
+        overrideYTConfig() {
+            // Monitor for yt.config_ object and override quality settings
+            const checkConfig = setInterval(() => {
+                if (window.yt && window.yt.config_) {
+                    clearInterval(checkConfig);
+                    
+                    // Override default quality settings
+                    if (window.yt.config_.PLAYER_VARS) {
+                        window.yt.config_.PLAYER_VARS.vq = 'hd2160'; // Force 4K
+                        Logger.log('Overrode yt.config_.PLAYER_VARS.vq to hd2160');
+                    }
+                    
+                    // Monitor for changes and re-apply
+                    const originalDefineProperty = Object.defineProperty;
+                    try {
+                        Object.defineProperty(window.yt.config_, 'PLAYER_VARS', {
+                            set(value) {
+                                if (value) {
+                                    value.vq = 'hd2160';
+                                }
+                                this._PLAYER_VARS = value;
+                            },
+                            get() {
+                                return this._PLAYER_VARS;
+                            },
+                            configurable: true
+                        });
+                    } catch (e) {
+                        Logger.log('Could not override PLAYER_VARS:', e);
+                    }
+                }
+            }, 100);
+            
+            // Clear after 10 seconds if not found
+            setTimeout(() => clearInterval(checkConfig), 10000);
+        },
+        
+        /**
+         * Continuously enforce quality overrides to bypass YouTube's adaptive logic
+         */
+        enforceQualityOverrides() {
+            // Periodically check and override any quality limitations
+            setInterval(() => {
+                try {
+                    const player = document.getElementById('movie_player');
+                    if (player) {
+                        // Override getPreferredQuality to always return highest
+                        if (player.getPreferredQuality && !player._qualityOverridden) {
+                            const original = player.getPreferredQuality;
+                            player.getPreferredQuality = function() {
+                                return 'hd2160'; // Always return 4K
+                            };
+                            player._qualityOverridden = true;
+                            Logger.log('Overrode player.getPreferredQuality()');
+                        }
+                        
+                        // Override any attempt to set quality below 4K
+                        if (player.setPlaybackQuality && !player._setQualityOverridden) {
+                            const originalSetQuality = player.setPlaybackQuality;
+                            player.setPlaybackQuality = function(quality) {
+                                // If YouTube tries to set quality below 4K, upgrade it
+                                const qualityOrder = ['tiny', 'small', 'medium', 'large', 'hd720', 'hd1080', 'hd1440', 'hd2160'];
+                                const targetIndex = qualityOrder.indexOf('hd2160');
+                                const requestedIndex = qualityOrder.indexOf(quality);
+                                
+                                if (requestedIndex < targetIndex && requestedIndex !== -1) {
+                                    Logger.log(`Intercepted quality downgrade attempt from hd2160 to ${quality}, blocking`);
+                                    return originalSetQuality.call(this, 'hd2160');
+                                }
+                                
+                                return originalSetQuality.call(this, quality);
+                            };
+                            player._setQualityOverridden = true;
+                            Logger.log('Overrode player.setPlaybackQuality() to prevent downgrades');
+                        }
+                        
+                        // Override network throttling detection
+                        if (player.getStatsForNerds && !player._statsOverridden) {
+                            const originalStats = player.getStatsForNerds;
+                            player.getStatsForNerds = function() {
+                                const stats = originalStats.call(this);
+                                // Report high bandwidth to prevent quality downgrades
+                                if (stats) {
+                                    stats.bandwidth = 999999999; // Report unlimited bandwidth
+                                    stats.bufferHealth = 100; // Report healthy buffer
+                                }
+                                return stats;
+                            };
+                            player._statsOverridden = true;
+                            Logger.log('Overrode network stats to prevent adaptive downgrade');
+                        }
+                    }
+                } catch (e) {
+                    // Ignore errors, just keep trying
+                }
+            }, 2000);
         }
     };
 
@@ -200,12 +611,27 @@
                         Logger.log('Enhanced capability for 4K:', config);
                     }
                     
-                    // Prefer VP9 and HDR
-                    if (config.video.contentType && 
-                        (config.video.contentType.includes('vp9') || 
-                         config.video.contentType.includes('vp09'))) {
-                        result.smooth = true;
-                        result.powerEfficient = true;
+                    // Prefer VP9 Profile 2 (HDR codec: vp09.02.*)
+                    if (config.video.contentType) {
+                        const contentType = config.video.contentType.toLowerCase();
+                        
+                        // VP9 Profile 2 for HDR (vp09.02.*)
+                        if (contentType.includes('vp09.02') || 
+                            contentType.includes('vp9.2') ||
+                            contentType.includes('vp9') || 
+                            contentType.includes('vp09')) {
+                            result.smooth = true;
+                            result.powerEfficient = true;
+                            result.supported = true;
+                            Logger.log('Enhanced VP9/HDR capability:', contentType);
+                        }
+                        
+                        // Also support high bitrate streams
+                        if (config.video.bitrate && config.video.bitrate > 10000000) { // >10Mbps
+                            result.smooth = true;
+                            result.powerEfficient = true;
+                            Logger.log('Enhanced high bitrate capability:', config.video.bitrate);
+                        }
                     }
                 }
                 
@@ -246,12 +672,201 @@
     };
 
     /**
+     * Bitrate Forcer
+     * Forces YouTube to use maximum available bitrate
+     * @namespace BitrateForcer
+     */
+    const BitrateForcer = {
+        init() {
+            Logger.info('Initializing bitrate forcer...');
+            
+            // Override YouTube's adaptive bitrate logic
+            this.interceptAdaptiveBitrate();
+            
+            // Force highest bitrate in player config
+            this.forceHighestBitrate();
+            
+            Logger.info('Bitrate forcer active');
+        },
+        
+        /**
+         * Intercept YouTube's adaptive bitrate algorithm
+         */
+        interceptAdaptiveBitrate() {
+            // Monitor for player object and override quality selection
+            const checkForPlayer = setInterval(() => {
+                const player = document.getElementById('movie_player');
+                if (player && player.getAvailableQualityLevels) {
+                    clearInterval(checkForPlayer);
+                    
+                    // Override quality level selection
+                    const originalSetPlaybackQuality = player.setPlaybackQuality;
+                    if (originalSetPlaybackQuality) {
+                        player.setPlaybackQuality = function(quality) {
+                            // Always try to use the highest quality
+                            const levels = player.getAvailableQualityLevels();
+                            const highest = levels[0]; // First is usually highest
+                            
+                            Logger.log('Forcing quality from', quality, 'to', highest);
+                            return originalSetPlaybackQuality.call(this, highest);
+                        };
+                    }
+                    
+                    // Override playback quality range
+                    const originalSetRange = player.setPlaybackQualityRange;
+                    if (originalSetRange) {
+                        player.setPlaybackQualityRange = function(min, max) {
+                            const levels = player.getAvailableQualityLevels();
+                            const highest = levels[0];
+                            
+                            Logger.log('Forcing quality range to highest:', highest);
+                            return originalSetRange.call(this, highest, highest);
+                        };
+                    }
+                }
+            }, 500);
+            
+            // Clear after 30 seconds if player not found
+            setTimeout(() => clearInterval(checkForPlayer), 30000);
+        },
+        
+        /**
+         * Store for active intervals and observers
+         */
+        activeMonitors: new WeakMap(),
+        mainObserver: null,
+        
+        /**
+         * Force highest bitrate in streaming data
+         */
+        forceHighestBitrate() {
+            // Create a MutationObserver to watch for video element
+            this.mainObserver = new MutationObserver((mutations) => {
+                const video = document.querySelector('video.html5-main-video');
+                if (video && !this.activeMonitors.has(video)) {
+                    // Mark as monitored
+                    this.activeMonitors.set(video, {});
+                    
+                    // Monitor quality changes
+                    video.addEventListener('loadedmetadata', () => {
+                        Logger.log('Video loaded, dimensions:', video.videoWidth, 'x', video.videoHeight);
+                        
+                        // Check if we're at maximum quality
+                        if (video.videoHeight < 2160) {
+                            Logger.warn('Not at 4K quality, attempting to upgrade...');
+                            this.forceQualityUpgrade();
+                        }
+                    });
+                    
+                    // Monitor for quality degradation with proper cleanup
+                    let lastHeight = 0;
+                    const qualityCheckInterval = setInterval(() => {
+                        // Check if video still exists in DOM
+                        if (!document.contains(video)) {
+                            clearInterval(qualityCheckInterval);
+                            this.activeMonitors.delete(video);
+                            Logger.log('Video removed, cleared quality monitoring');
+                            return;
+                        }
+                        
+                        if (video.videoHeight !== lastHeight) {
+                            Logger.log('Quality changed to:', video.videoHeight + 'p');
+                            lastHeight = video.videoHeight;
+                            
+                            // If quality dropped, try to restore
+                            if (video.videoHeight < 2160 && Config.get('preferredQuality') === '2160p') {
+                                Logger.warn('Quality dropped, attempting to restore...');
+                                this.forceQualityUpgrade();
+                            }
+                        }
+                    }, 5000);
+                    
+                    // Store interval ID in WeakMap for proper cleanup
+                    const monitorData = this.activeMonitors.get(video);
+                    monitorData.intervalId = qualityCheckInterval;
+                    
+                    // Cleanup on page unload
+                    const cleanupInterval = () => {
+                        clearInterval(qualityCheckInterval);
+                        this.activeMonitors.delete(video);
+                        Logger.log('Cleaned up quality monitoring on unload');
+                    };
+                    
+                    window.addEventListener('beforeunload', cleanupInterval, { once: true });
+                    
+                    // Also detect when video is removed using another observer
+                    const removalObserver = new MutationObserver((mutations) => {
+                        for (const mutation of mutations) {
+                            for (const removed of mutation.removedNodes) {
+                                if (removed === video || (removed.contains && removed.contains(video))) {
+                                    clearInterval(qualityCheckInterval);
+                                    removalObserver.disconnect();
+                                    this.activeMonitors.delete(video);
+                                    Logger.log('Video removed from DOM, cleaned up monitoring');
+                                    return;
+                                }
+                            }
+                        }
+                    });
+                    
+                    if (video.parentNode) {
+                        removalObserver.observe(video.parentNode, { childList: true });
+                    }
+                    
+                    monitorData.removalObserver = removalObserver;
+                }
+            });
+            
+            if (document.body) {
+                this.mainObserver.observe(document.body, { childList: true, subtree: true });
+            } else {
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (document.body) {
+                        this.mainObserver.observe(document.body, { childList: true, subtree: true });
+                    }
+                });
+            }
+        },
+        
+        /**
+         * Cleanup method to disconnect observers
+         */
+        cleanup() {
+            if (this.mainObserver) {
+                this.mainObserver.disconnect();
+                this.mainObserver = null;
+            }
+            
+            // Clear all active monitoring intervals
+            // Note: WeakMap doesn't have iteration, so we can't manually clear
+            // but intervals will be cleared when videos are removed or page unloads
+            Logger.log('BitrateForcer cleanup complete');
+        },
+        
+        /**
+         * Force quality upgrade
+         */
+        forceQualityUpgrade() {
+            const player = document.getElementById('movie_player');
+            if (player && player.setPlaybackQualityRange) {
+                try {
+                    player.setPlaybackQualityRange('hd2160', 'hd2160');
+                    Logger.log('Forced quality upgrade to 4K');
+                } catch (e) {
+                    Logger.log('Failed to upgrade quality:', e);
+                }
+            }
+        }
+    };
+
+    /**
      * YouTube player quality controller
      * @namespace QualityController
      */
     const QualityController = {
         player: null,
         checkInterval: null,
+        monitoringInterval: null,
         appliedQuality: false,
         
         init() {
@@ -259,14 +874,41 @@
             Logger.info('Quality controller initialized');
         },
         
+        cleanup() {
+            if (this.checkInterval) {
+                clearInterval(this.checkInterval);
+                this.checkInterval = null;
+            }
+            if (this.monitoringInterval) {
+                clearInterval(this.monitoringInterval);
+                this.monitoringInterval = null;
+            }
+            Logger.log('QualityController cleanup complete');
+        },
+        
         waitForPlayer() {
-            // Try multiple methods to get the player
+            // Clear any existing interval
+            if (this.checkInterval) {
+                clearInterval(this.checkInterval);
+            }
+            
+            // Try multiple methods to get the player with timeout
+            let attempts = 0;
+            const maxAttempts = 60; // 30 seconds max
+            
             this.checkInterval = setInterval(() => {
+                attempts++;
                 this.player = this.getPlayer();
                 
                 if (this.player) {
                     clearInterval(this.checkInterval);
+                    this.checkInterval = null;
                     this.setupQualityMonitoring();
+                } else if (attempts >= maxAttempts) {
+                    // Timeout after 30 seconds
+                    clearInterval(this.checkInterval);
+                    this.checkInterval = null;
+                    Logger.warn('Player not found after 30 seconds, giving up');
                 }
             }, 500);
             
@@ -288,6 +930,11 @@
         setupQualityMonitoring() {
             Logger.log('Player found, setting up quality monitoring');
             
+            // Clear any existing monitoring interval
+            if (this.monitoringInterval) {
+                clearInterval(this.monitoringInterval);
+            }
+            
             // Apply quality immediately
             this.applyQualitySettings();
             
@@ -308,7 +955,7 @@
             }
             
             // Reapply periodically to ensure settings stick
-            setInterval(() => {
+            this.monitoringInterval = setInterval(() => {
                 if (!this.appliedQuality) {
                     this.applyQualitySettings();
                 }
@@ -700,6 +1347,19 @@
                     location.reload();
                 });
                 
+                GM_registerMenuCommand('🔍 Show Debug Info', () => {
+                    if (window.YT4KEnhancer && window.YT4KEnhancer.debugInfo) {
+                        window.YT4KEnhancer.debugInfo();
+                    }
+                });
+                
+                GM_registerMenuCommand('🔄 Reapply Quality Settings', () => {
+                    if (window.YT4KEnhancer && window.YT4KEnhancer.reapply) {
+                        window.YT4KEnhancer.reapply();
+                        Logger.info('Quality settings reapplied');
+                    }
+                });
+                
             } catch (e) {
                 Logger.warn('Failed to register menu commands:', e);
             }
@@ -712,14 +1372,21 @@
      */
     const App = {
         async init() {
-            Logger.info('Initializing YouTube 4K HDR Quality Enhancer v1.0');
+            Logger.info('Initializing YouTube 4K HDR Quality Enhancer v2.0 with Script Interception');
             
             // Initialize configuration
             await Config.init();
             
+            // CRITICAL: Initialize script interceptor FIRST (must run before page scripts)
+            ScriptInterceptor.init();
+            
+            // Override YouTube's settings to bypass quality restrictions
+            SettingsOverride.init();
+            
             // Initialize components
             HWAccelOptimizer.init();
             WidevineOptimizer.init();
+            BitrateForcer.init();
             AudioOptimizer.init();
             BufferOptimizer.init();
             
@@ -735,7 +1402,7 @@
             // Initialize menu
             MenuManager.init();
             
-            Logger.info('YouTube 4K HDR Quality Enhancer initialized ✓');
+            Logger.info('YouTube 4K HDR Quality Enhancer v2.0 initialized with script interception ✓');
         },
         
         initPlayer() {
@@ -748,15 +1415,69 @@
     App.init().catch(e => {
         Logger.error('Initialization failed:', e);
     });
+    
+    // Global cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        Logger.log('Page unloading, performing cleanup...');
+        
+        // Cleanup BitrateForcer observers and intervals
+        if (BitrateForcer && BitrateForcer.cleanup) {
+            BitrateForcer.cleanup();
+        }
+        
+        // Cleanup QualityController intervals
+        if (QualityController && QualityController.cleanup) {
+            QualityController.cleanup();
+        }
+        
+        // Clear stats overlay interval
+        if (StatsOverlay && StatsOverlay.updateInterval) {
+            clearInterval(StatsOverlay.updateInterval);
+        }
+        
+        Logger.log('Cleanup complete');
+    });
 
     // Expose API for debugging
     window.YT4KEnhancer = {
-        version: '1.0',
+        version: '2.0',
         config: Config,
         quality: QualityController,
+        interceptor: ScriptInterceptor,
+        bitrateForcer: BitrateForcer,
         reapply: () => {
             QualityController.appliedQuality = false;
             QualityController.applyQualitySettings();
+        },
+        debugInfo: () => {
+            console.log('YT4KEnhancer Debug Info:');
+            console.log('Config:', Config.current);
+            console.log('Player Response:', window.ytInitialPlayerResponse);
+            console.log('Initial Data:', window.ytInitialData);
+            
+            if (window.ytInitialPlayerResponse?.streamingData) {
+                const sd = window.ytInitialPlayerResponse.streamingData;
+                console.log('Available Formats:', sd.formats?.map(f => `${f.height}p @ ${Math.round(f.bitrate/1000)}kbps`));
+                console.log('Adaptive Formats:', sd.adaptiveFormats?.slice(0, 10).map(f => ({
+                    quality: f.height + 'p',
+                    codec: f.mimeType?.split(';')[0],
+                    bitrate: Math.round(f.bitrate/1000) + 'kbps',
+                    fps: f.fps
+                })));
+            }
+        },
+        cleanup: () => {
+            Logger.log('Manual cleanup requested');
+            if (BitrateForcer && BitrateForcer.cleanup) {
+                BitrateForcer.cleanup();
+            }
+            if (QualityController && QualityController.cleanup) {
+                QualityController.cleanup();
+            }
+            if (StatsOverlay && StatsOverlay.updateInterval) {
+                clearInterval(StatsOverlay.updateInterval);
+            }
+            Logger.log('Manual cleanup complete');
         }
     };
 
