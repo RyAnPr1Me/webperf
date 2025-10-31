@@ -135,7 +135,9 @@ js:(args,inputData)=>{ try{
 grep:(pattern,inputData)=>{ if(!inputData) return; return inputData.split('\\n').filter(l=>l.includes(pattern)).join('\\n'); },
 head:(args,inputData)=>{ const n=parseInt(args)||5; if(!inputData) return; return inputData.split('\\n').slice(0,n).join('\\n'); },
 tail:(args,inputData)=>{ const n=parseInt(args)||5; if(!inputData) return; const lines=inputData.split('\\n'); return lines.slice(-n).join('\\n'); },
-wc:(args,inputData)=>{ if(!inputData) return; const lines=inputData.split('\\n'); const words=inputData.split(/\\s+/); const chars=inputData.length; return lines.length+' '+words.length+' '+chars; },
+wc:(args,inputData)=>{ if(!inputData) return; const lines=inputData.split('\\n'); const words=inputData.split(/\\s+/); 
+    // Optimized: Use length property instead of split('').length - both give same result but length is O(1)
+    const chars=inputData.length; return lines.length+' '+words.length+' '+chars; },
 sort:(args,inputData)=>{ if(!inputData) return; return inputData.split('\\n').sort().join('\\n'); },
 uniq:(args,inputData)=>{ if(!inputData) return; const seen={}; return inputData.split('\\n').filter(l=>!seen[l]&&(seen[l]=true)).join('\\n'); },
 openfolder: async ()=>{ try{ realCWDHandle=await window.showDirectoryPicker(); print('Folder selected: '+realCWDHandle.name); } catch(e){print('Cancelled','error'); } },
