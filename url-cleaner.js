@@ -46,23 +46,22 @@
     };
 
     // ====== URL PARAM CLEANER ======
-    const TRACKING_PARAMS = [
-        /^utm_/, /^fbclid$/, /^gclid$/, /^mc_eid$/, /^ga_.+/, /^yclid$/, /^vero_id$/,
-        /^_hsenc$/, /^_hsmi$/, /^mkt_tok$/, /^oly_.+/, /^cmpid$/, /^ref$/, /^spm$/,
-        /^igshid$/, /^si$/, /^msclkid$/, /^twclid$/
-    ];
+    // Optimized: Combined into single regex for better performance
+    const TRACKING_PARAM_REGEX = /^(utm_|fbclid|gclid|mc_eid|ga_.+|yclid|vero_id|_hsenc|_hsmi|mkt_tok|oly_.+|cmpid|ref|spm|igshid|si|msclkid|twclid)$/;
 
     function cleanURL(url) {
         try {
             const u = new URL(url);
-            const params = [...u.searchParams.entries()];
             let changed = false;
-            for (const [key] of params) {
-                if (TRACKING_PARAMS.some(rx => rx.test(key))) {
+            
+            // Iterate directly over searchParams for better performance
+            for (const key of u.searchParams.keys()) {
+                if (TRACKING_PARAM_REGEX.test(key)) {
                     u.searchParams.delete(key);
                     changed = true;
                 }
             }
+            
             return changed ? u.toString() : url;
         } catch {
             return url;

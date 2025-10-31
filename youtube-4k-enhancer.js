@@ -89,20 +89,15 @@
         },
 
         /**
-         * Process script content to modify player data
-         * NOTE: This method is limited in scope - it only logs detection.
+         * Process script content to detect player data
+         * NOTE: We don't modify inline scripts to avoid XSS risks.
          * Actual interception happens via window variable hooks which are safer.
          */
         processScript(script) {
-            if (script.textContent) {
-                const originalContent = script.textContent;
-                
-                // Check if this script contains ytInitialPlayerResponse
-                if (originalContent.includes('ytInitialPlayerResponse')) {
-                    // Log detection but don't modify inline scripts to avoid XSS risks
-                    // Instead, we rely on window variable interception which is safer
-                    Logger.log('Detected ytInitialPlayerResponse script (will intercept via window hooks)');
-                }
+            // Only log detection for debugging purposes
+            // Never modify script.textContent as it could introduce security vulnerabilities
+            if (script.textContent && script.textContent.includes('ytInitialPlayerResponse')) {
+                Logger.log('Detected ytInitialPlayerResponse script (will intercept via window hooks)');
             }
         },
 
@@ -146,30 +141,25 @@
             try {
                 Logger.log('Enhancing player response object');
                 
-                // Use structuredClone if available (more efficient)
-                // Fall back to simple object spread for shallow clone
-                let enhanced;
-                if (typeof structuredClone === 'function') {
-                    try {
-                        enhanced = structuredClone(response);
-                    } catch (e) {
-                        // structuredClone failed (circular refs, etc), use shallow clone
-                        Logger.log('structuredClone failed, using shallow clone');
-                        enhanced = { ...response };
-                        if (response.streamingData) {
-                            enhanced.streamingData = { ...response.streamingData };
-                        }
+                // Use shallow clone approach for better compatibility and performance
+                // structuredClone can fail with circular references or non-cloneable objects
+                let enhanced = { ...response };
+                
+                // Clone streaming data if present (most important for our modifications)
+                if (response.streamingData) {
+                    enhanced.streamingData = { ...response.streamingData };
+                    
+                    // Clone arrays for safe in-place sorting
+                    if (response.streamingData.formats) {
+                        enhanced.streamingData.formats = [...response.streamingData.formats];
                     }
-                } else {
-                    // Shallow clone for older browsers (safer than JSON.parse/stringify)
-                    enhanced = { ...response };
-                    if (response.streamingData) {
-                        enhanced.streamingData = { ...response.streamingData };
+                    if (response.streamingData.adaptiveFormats) {
+                        enhanced.streamingData.adaptiveFormats = [...response.streamingData.adaptiveFormats];
                     }
                 }
                 
+                // Sort formats by quality (safe to modify cloned arrays)
                 if (enhanced.streamingData) {
-                    // Sort formats by quality (in-place, no deep clone needed)
                     if (enhanced.streamingData.formats && Array.isArray(enhanced.streamingData.formats)) {
                         enhanced.streamingData.formats.sort((a, b) => {
                             return (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0);
@@ -1430,9 +1420,9 @@
             QualityController.cleanup();
         }
         
-        // Clear stats overlay interval
-        if (StatsOverlay && StatsOverlay.updateInterval) {
-            clearInterval(StatsOverlay.updateInterval);
+        // Clear stats overlay interval using destroy method
+        if (StatsOverlay && StatsOverlay.destroy) {
+            StatsOverlay.destroy();
         }
         
         Logger.log('Cleanup complete');

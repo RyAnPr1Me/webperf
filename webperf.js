@@ -637,12 +637,18 @@
         inFlightRequests: new Map(),
 
         /**
+         * Memory pressure monitoring interval ID
+         * @type {number|null}
+         */
+        memoryCheckInterval: null,
+
+        /**
          * Initialize cache
          */
         init() {
             // Monitor memory pressure if available
             if ('memory' in performance) {
-                setInterval(() => this.checkMemoryPressure(), 30000);
+                this.memoryCheckInterval = setInterval(() => this.checkMemoryPressure(), 30000);
             }
         },
 
@@ -804,6 +810,16 @@
                 this.delete(key);
             }
             this.stats = { hits: 0, misses: 0, evictions: 0 };
+        },
+
+        /**
+         * Cleanup method to stop memory monitoring
+         */
+        cleanup() {
+            if (this.memoryCheckInterval) {
+                clearInterval(this.memoryCheckInterval);
+                this.memoryCheckInterval = null;
+            }
         }
     };
 
@@ -3190,12 +3206,16 @@ Uptime: ${Telemetry.getUptime()}s`;
         cleanup() {
             Logger.info('Cleaning up...');
             
+            // Cleanup observers and modules
             ObserverManager.disconnectAll();
             ImageOptimizer.cleanup();
             LazyLoader.cleanup();
             Telemetry.cleanup();
             DiagnosticsPanel.remove();
             FPSManager.restore();
+            
+            // Cleanup cache manager intervals
+            CacheManager.cleanup();
             
             this.initialized = false;
         }
