@@ -2177,27 +2177,11 @@
                     }
                 }
             });
-        },
-        
-        deferNonCriticalRequests() {
-            // Delay non-critical third-party requests until page is loaded
-            const originalFetch = window.fetch;
-            window.fetch = (...args) => {
-                const url = args[0];
-                if (this.shouldDefer(url)) {
-                    // Delay until page is interactive
-                    return new Promise((resolve, reject) => {
-                        SafeScheduler.idle(() => {
-                            Logger.log('Deferred fetch:', url);
-                            originalFetch.apply(this, args)
-                                .then(resolve)
-                                .catch(reject);
-                        });
-                    });
-                }
-                return originalFetch.apply(this, args);
-            };
         }
+        
+        // Note: deferNonCriticalRequests() was removed as this functionality
+        // is now handled by AdTrackerBlocker to avoid multiple fetch() overrides.
+        // See AdTrackerBlocker.blockRequests() for unified fetch handling.
     };
 
     /**

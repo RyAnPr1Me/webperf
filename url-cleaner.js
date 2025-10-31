@@ -103,17 +103,18 @@
     }
 
     // ====== SHORTLINK RESOLVER ======
-    const SHORT_DOMAINS = [
+    // Optimized: Use Set for O(1) lookup instead of Array.includes O(n)
+    const SHORT_DOMAINS = new Set([
         't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
         'shorturl.at', 'is.gd', 'cutt.ly', 'rb.gy', 's.id', 'v.gd'
-    ];
+    ]);
 
     function expandShortLinks() {
         const links = document.querySelectorAll('a[href]');
         links.forEach(a => {
             try {
                 const u = new URL(a.href);
-                if (SHORT_DOMAINS.includes(u.hostname.replace(/^www\./, ''))) {
+                if (SHORT_DOMAINS.has(u.hostname.replace(/^www\./, ''))) {
                     GM_xmlhttpRequest({
                         method: 'HEAD',
                         url: a.href,
