@@ -189,10 +189,15 @@
                 
                 const imageData = ctx.getImageData(0, 0, this.width, this.height);
                 const noise = Config.sessionData.canvasNoise;
+                const noiseValue = Math.floor(noise * 255);
                 
-                // Add minimal noise to prevent fingerprinting
-                for (let i = 0; i < imageData.data.length; i += 4) {
-                    imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + Math.floor(noise * 255)));
+                // Optimized: Add minimal noise to prevent fingerprinting
+                // Only modify red channel for better performance
+                const data = imageData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const newValue = data[i] + noiseValue;
+                    // Branchless clamping is faster than Math.max/Math.min
+                    data[i] = newValue < 0 ? 0 : (newValue > 255 ? 255 : newValue);
                 }
                 
                 ctx.putImageData(imageData, 0, 0);
@@ -208,8 +213,13 @@
         if (!Config.get('randomizeNoise')) return;
         
         const noise = Config.sessionData.canvasNoise;
-        for (let i = 0; i < imageData.data.length; i += 4) {
-            imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + Math.floor(noise * 255)));
+        const noiseValue = Math.floor(noise * 255);
+        const data = imageData.data;
+        
+        // Optimized: branchless clamping for better performance
+        for (let i = 0; i < data.length; i += 4) {
+            const newValue = data[i] + noiseValue;
+            data[i] = newValue < 0 ? 0 : (newValue > 255 ? 255 : newValue);
         }
     };
     
