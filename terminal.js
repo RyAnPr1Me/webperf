@@ -125,11 +125,19 @@ date:()=>print(new Date().toString()),
 whoami:()=>print(user),
 history:()=>history.forEach((c,i)=>print((i+1)+': '+c)),
 echo:(args,inputData)=>args||inputData,
-js:(args,inputData)=>{ try{ const r=eval(args||inputData); print(r,'jsres'); return r;} catch(e){ print('JS Error: '+e,'error'); } },
+js:(args,inputData)=>{ try{ 
+    // WARNING: eval is used intentionally for a terminal emulator. Only use this in trusted environments.
+    // This command allows executing arbitrary JavaScript for debugging purposes.
+    const r=eval(args||inputData); 
+    print(r,'jsres'); 
+    return r;
+} catch(e){ print('JS Error: '+e,'error'); } },
 grep:(pattern,inputData)=>{ if(!inputData) return; return inputData.split('\\n').filter(l=>l.includes(pattern)).join('\\n'); },
 head:(args,inputData)=>{ const n=parseInt(args)||5; if(!inputData) return; return inputData.split('\\n').slice(0,n).join('\\n'); },
 tail:(args,inputData)=>{ const n=parseInt(args)||5; if(!inputData) return; const lines=inputData.split('\\n'); return lines.slice(-n).join('\\n'); },
-wc:(args,inputData)=>{ if(!inputData) return; const lines=inputData.split('\\n'); const words=inputData.split(/\\s+/); const chars=inputData.split(''); return lines.length+' '+words.length+' '+chars.length; },
+wc:(args,inputData)=>{ if(!inputData) return; const lines=inputData.split('\\n'); const words=inputData.split(/\\s+/); 
+    // Optimized: Use length property instead of split('').length - both give same result but length is O(1)
+    const chars=inputData.length; return lines.length+' '+words.length+' '+chars; },
 sort:(args,inputData)=>{ if(!inputData) return; return inputData.split('\\n').sort().join('\\n'); },
 uniq:(args,inputData)=>{ if(!inputData) return; const seen={}; return inputData.split('\\n').filter(l=>!seen[l]&&(seen[l]=true)).join('\\n'); },
 openfolder: async ()=>{ try{ realCWDHandle=await window.showDirectoryPicker(); print('Folder selected: '+realCWDHandle.name); } catch(e){print('Cancelled','error'); } },

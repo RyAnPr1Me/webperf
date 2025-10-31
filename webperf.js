@@ -637,12 +637,18 @@
         inFlightRequests: new Map(),
 
         /**
+         * Memory pressure monitoring interval ID
+         * @type {number|null}
+         */
+        memoryCheckInterval: null,
+
+        /**
          * Initialize cache
          */
         init() {
             // Monitor memory pressure if available
             if ('memory' in performance) {
-                setInterval(() => this.checkMemoryPressure(), 30000);
+                this.memoryCheckInterval = setInterval(() => this.checkMemoryPressure(), 30000);
             }
         },
 
@@ -804,6 +810,16 @@
                 this.delete(key);
             }
             this.stats = { hits: 0, misses: 0, evictions: 0 };
+        },
+
+        /**
+         * Cleanup method to stop memory monitoring
+         */
+        cleanup() {
+            if (this.memoryCheckInterval) {
+                clearInterval(this.memoryCheckInterval);
+                this.memoryCheckInterval = null;
+            }
         }
     };
 
@@ -2161,27 +2177,11 @@
                     }
                 }
             });
-        },
-        
-        deferNonCriticalRequests() {
-            // Delay non-critical third-party requests until page is loaded
-            const originalFetch = window.fetch;
-            window.fetch = (...args) => {
-                const url = args[0];
-                if (this.shouldDefer(url)) {
-                    // Delay until page is interactive
-                    return new Promise((resolve, reject) => {
-                        SafeScheduler.idle(() => {
-                            Logger.log('Deferred fetch:', url);
-                            originalFetch.apply(this, args)
-                                .then(resolve)
-                                .catch(reject);
-                        });
-                    });
-                }
-                return originalFetch.apply(this, args);
-            };
         }
+        
+        // Note: deferNonCriticalRequests() was removed as this functionality
+        // is now handled by AdTrackerBlocker to avoid multiple fetch() overrides.
+        // See AdTrackerBlocker.blockRequests() for unified fetch handling.
     };
 
     /**
@@ -3190,12 +3190,16 @@ Uptime: ${Telemetry.getUptime()}s`;
         cleanup() {
             Logger.info('Cleaning up...');
             
+            // Cleanup observers and modules
             ObserverManager.disconnectAll();
             ImageOptimizer.cleanup();
             LazyLoader.cleanup();
             Telemetry.cleanup();
             DiagnosticsPanel.remove();
             FPSManager.restore();
+            
+            // Cleanup cache manager intervals
+            CacheManager.cleanup();
             
             this.initialized = false;
         }

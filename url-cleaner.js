@@ -46,23 +46,22 @@
     };
 
     // ====== URL PARAM CLEANER ======
-    const TRACKING_PARAMS = [
-        /^utm_/, /^fbclid$/, /^gclid$/, /^mc_eid$/, /^ga_.+/, /^yclid$/, /^vero_id$/,
-        /^_hsenc$/, /^_hsmi$/, /^mkt_tok$/, /^oly_.+/, /^cmpid$/, /^ref$/, /^spm$/,
-        /^igshid$/, /^si$/, /^msclkid$/, /^twclid$/
-    ];
+    // Optimized: Combined into single regex for better performance
+    const TRACKING_PARAM_REGEX = /^(utm_|fbclid|gclid|mc_eid|ga_.+|yclid|vero_id|_hsenc|_hsmi|mkt_tok|oly_.+|cmpid|ref|spm|igshid|si|msclkid|twclid)$/;
 
     function cleanURL(url) {
         try {
             const u = new URL(url);
-            const params = [...u.searchParams.entries()];
             let changed = false;
-            for (const [key] of params) {
-                if (TRACKING_PARAMS.some(rx => rx.test(key))) {
+            
+            // Iterate directly over searchParams for better performance
+            for (const key of u.searchParams.keys()) {
+                if (TRACKING_PARAM_REGEX.test(key)) {
                     u.searchParams.delete(key);
                     changed = true;
                 }
             }
+            
             return changed ? u.toString() : url;
         } catch {
             return url;
@@ -79,15 +78,20 @@
     }
 
     // ====== REDIRECT STRIPPER ======
+    // Optimized: Compile regex once for better performance
+    const REDIRECT_REGEX = /google\..+\/url\?q=|facebook\.com\/l\.php|t\.co\//;
+    
     function stripRedirects() {
         document.addEventListener('mousedown', e => {
             const a = e.target.closest('a[href]');
             if (!a) return;
             const url = a.href;
-            if (url.match(/google\..+\/url\?q=|facebook\.com\/l\.php|t\.co\//)) {
+            if (REDIRECT_REGEX.test(url)) {
                 try {
-                    const real = new URL(url).searchParams.get('q') ||
-                                 new URL(url).searchParams.get('u') ||
+                    // Optimized: Parse URL once instead of twice
+                    const urlObj = new URL(url);
+                    const real = urlObj.searchParams.get('q') ||
+                                 urlObj.searchParams.get('u') ||
                                  a.href;
                     if (real && real.startsWith('http')) {
                         a.href = real;
@@ -99,17 +103,18 @@
     }
 
     // ====== SHORTLINK RESOLVER ======
-    const SHORT_DOMAINS = [
+    // Optimized: Use Set for O(1) lookup instead of Array.includes O(n)
+    const SHORT_DOMAINS = new Set([
         't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
         'shorturl.at', 'is.gd', 'cutt.ly', 'rb.gy', 's.id', 'v.gd'
-    ];
+    ]);
 
     function expandShortLinks() {
         const links = document.querySelectorAll('a[href]');
         links.forEach(a => {
             try {
                 const u = new URL(a.href);
-                if (SHORT_DOMAINS.includes(u.hostname.replace(/^www\./, ''))) {
+                if (SHORT_DOMAINS.has(u.hostname.replace(/^www\./, ''))) {
                     GM_xmlhttpRequest({
                         method: 'HEAD',
                         url: a.href,
@@ -131,22 +136,23 @@
 
     // ====== COOKIE POPUP AUTO-REJECTOR ======
     function autoRejectCookies() {
-        const selectors = [
-            '[id*="cookie"] button', '[class*="cookie"] button',
-            'button[aria-label*="reject"]', 'button:contains("Reject")',
-            'button:contains("Decline")', 'button:contains("Deny")',
-            'button:contains("Refuse")'
-        ];
-
+        // Optimized: Combined selector for better performance
+        const selector = '[id*="cookie"] button, [class*="cookie"] button, button[aria-label*="reject"]';
+        const rejectPattern = /reject|decline|deny|refuse/i;
+        
+        // Debounce mutation observer to reduce CPU usage
+        let timeout;
         const observer = new MutationObserver(() => {
-            selectors.forEach(sel => {
-                document.querySelectorAll(sel).forEach(btn => {
-                    if (btn && btn.innerText.match(/reject|decline|deny|refuse/i)) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                document.querySelectorAll(selector).forEach(btn => {
+                    if (btn && !btn.dataset.processed && rejectPattern.test(btn.innerText)) {
+                        btn.dataset.processed = 'true'; // Mark as processed to avoid re-clicking
                         btn.click();
                         Logger.toast('🍪 Cookies rejected');
                     }
                 });
-            });
+            }, 100); // Debounce by 100ms
         });
         observer.observe(document.documentElement, { childList: true, subtree: true });
     }
